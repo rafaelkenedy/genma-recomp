@@ -21,7 +21,7 @@ jobs:
   release:
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Toolchain cache
         id: cache
@@ -48,16 +48,32 @@ jobs:
           if ($env:GITHUB_REF -like 'refs/tags/*') { $v = $env:GITHUB_REF_NAME } else { $v = "dev-$($env:GITHUB_SHA.Substring(0, 8))" }
           "name=$v" >> $env:GITHUB_OUTPUT
 
+      - name: Tools
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) { choco install ninja --no-progress -y | Out-Null }
+          cmake --version
+          ninja --version
+
+      # a failing step's last lines become an error annotation, readable without signing in
       - name: Configure
         shell: pwsh
-        run: >
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DXBE_RELEASE=ON
-          -DXBE_RELEASE_VERSION=${{ steps.version.outputs.name }}
-          -DCMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake -DLLVM_MINGW="$env:GITHUB_WORKSPACE/llvm-mingw"
-          "-DCMAKE_C_FLAGS=-march=x86-64-v2" "-DCMAKE_CXX_FLAGS=-march=x86-64-v2"
+        run: |
+          $out = & cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DXBE_RELEASE=ON `
+            "-DXBE_RELEASE_VERSION=${{ steps.version.outputs.name }}" `
+            -DCMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake "-DLLVM_MINGW=$env:GITHUB_WORKSPACE/llvm-mingw" `
+            "-DCMAKE_C_FLAGS=-march=x86-64-v2" "-DCMAKE_CXX_FLAGS=-march=x86-64-v2" 2>&1
+          $code = $LASTEXITCODE
+          $out | Write-Output
+          if ($code) { "::error title=Configure::$((($out | Select-Object -Last 30) -join '%0A'))"; exit $code }
 
       - name: Build and package
-        run: cmake --build build --target package_GenmaOnimusha
+        shell: pwsh
+        run: |
+          $out = & cmake --build build --target package_GenmaOnimusha 2>&1
+          $code = $LASTEXITCODE
+          $out | Write-Output
+          if ($code) { "::error title=Build::$((($out | Where-Object { $_ -match 'error|FAILED' } | Select-Object -First 30) -join '%0A'))"; exit $code }
 
       - name: Zip
         shell: pwsh
