@@ -54,14 +54,17 @@ jobs:
           if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) { choco install ninja --no-progress -y | Out-Null }
           cmake --version
           ninja --version
+          (Get-Command ninja).Source
 
       # a failing step's last lines become an error annotation, readable without signing in
       - name: Configure
         shell: pwsh
         run: |
-          $out = & cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DXBE_RELEASE=ON `
+          # every -D quoted: PowerShell splits an unquoted -DX=a.b at the dot
+          $ninja = (Get-Command ninja).Source
+          $out = & cmake -S . -B build -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninja" "-DCMAKE_BUILD_TYPE=Release" "-DXBE_RELEASE=ON" `
             "-DXBE_RELEASE_VERSION=${{ steps.version.outputs.name }}" `
-            -DCMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake "-DLLVM_MINGW=$env:GITHUB_WORKSPACE/llvm-mingw" `
+            "-DCMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake" "-DLLVM_MINGW=$env:GITHUB_WORKSPACE/llvm-mingw" `
             "-DCMAKE_C_FLAGS=-march=x86-64-v2" "-DCMAKE_CXX_FLAGS=-march=x86-64-v2" 2>&1
           $code = $LASTEXITCODE
           $out | Write-Output
