@@ -6,6 +6,8 @@ endif()
 if(NOT LLVM_MINGW)
     message(FATAL_ERROR "set LLVM_MINGW to the llvm-mingw folder (cmake -DLLVM_MINGW=... or the environment)")
 endif()
+# forward slashes: a Windows path's backslashes would read as escapes in the files CMake writes
+file(TO_CMAKE_PATH "${LLVM_MINGW}" LLVM_MINGW)
 # try_compile projects see it too
 list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES LLVM_MINGW)
 set(ENV{LLVM_MINGW} ${LLVM_MINGW})
