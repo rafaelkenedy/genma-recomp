@@ -1,0 +1,80 @@
+# Builds the release without game code: the launcher, the runtime library, the recompiler and the LLVM-MinGW
+# toolchain. The player's PC builds the game from their own disc image on the first start (docs/distribuicao.md).
+# Every push and pull request uploads the zip as an artifact; a tag v* publishes it as a GitHub release.
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write  # the release on tags
+
+env:
+  LLVM_MINGW_VERSION: '20260922'
+  LLVM_MINGW_SHA256: e3ad77d117a4bea19a7a3b333341824d79a5a371004a10e25b8504e7b3047666
+
+jobs:
+  release:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain cache
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: llvm-mingw
+          key: llvm-mingw-${{ env.LLVM_MINGW_VERSION }}-ucrt-x86_64
+
+      - name: Download LLVM-MinGW
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $name = "llvm-mingw-$env:LLVM_MINGW_VERSION-ucrt-x86_64"
+          Invoke-WebRequest "https://github.com/mstorsjo/llvm-mingw/releases/download/$env:LLVM_MINGW_VERSION/$name.zip" -OutFile llvm-mingw.zip
+          $hash = (Get-FileHash llvm-mingw.zip -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne $env:LLVM_MINGW_SHA256) { throw "llvm-mingw.zip sha256 $hash, expected $env:LLVM_MINGW_SHA256" }
+          Expand-Archive llvm-mingw.zip -DestinationPath .
+          Rename-Item $name llvm-mingw
+
+      - name: Version
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/*') { $v = $env:GITHUB_REF_NAME } else { $v = "dev-$($env:GITHUB_SHA.Substring(0, 8))" }
+          "name=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Configure
+        shell: pwsh
+        run: >
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DXBE_RELEASE=ON
+          -DXBE_RELEASE_VERSION=${{ steps.version.outputs.name }}
+          -DCMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake -DLLVM_MINGW="$env:GITHUB_WORKSPACE/llvm-mingw"
+          "-DCMAKE_C_FLAGS=-march=x86-64-v2" "-DCMAKE_CXX_FLAGS=-march=x86-64-v2"
+
+      - name: Build and package
+        run: cmake --build build --target package_GenmaOnimusha
+
+      - name: Zip
+        shell: pwsh
+        run: |
+          $zip = "GenmaOnimusha-${{ steps.version.outputs.name }}-win64.zip"
+          Push-Location build/release
+          7z a -tzip -mx=9 "$env:GITHUB_WORKSPACE/$zip" GenmaOnimusha | Out-Null
+          Pop-Location
+          "ZIP=$zip" >> $env:GITHUB_ENV
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GenmaOnimusha-${{ steps.version.outputs.name }}-win64
+          path: build/release/GenmaOnimusha
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" "${{ env.ZIP }}" --title "${{ github.ref_name }}" --generate-notes

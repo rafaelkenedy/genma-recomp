@@ -1,0 +1,40 @@
+# build output
+/out/
+/build/
+*.zip
+*.pdb
+*.exe
+*.obj
+*.o
+*.a
+
+# recompiled code: derived from the game, never committed
+/generated/
+
+# the user's own game files; only the note stays
+/assets/*
+!/assets/PUT_YOUR_GAME_HERE.txt
+
+# a release's first start (launcher): extracted xbe, generated code, objects, the built game
+/work/
+/game/
+
+# runtime and debugging files
+settings.toml
+/logs/
+/hdd/
+/CrashDumps/
+captures/
+record.raw
+*.raw
+/print*.jpg
+/print*.png
+
+# editors
+.vs/
+.vscode/
+.idea/
+
+# local tools and notes
+.local
+__pycache__/

@@ -1,0 +1,59 @@
+# XDK 3911 library data layouts (XAPI 3911, D3D8 3948, DSOUND 3936). Each value is read from Genma Onimusha's
+# default.xbe (title 43430001) at the address given. Keys this build has no field for stay unknown.
+[layout]
+# D3D8 CDevice, the static device at 0x191490 that D3D__pDevice points at
+CDevice_Push          = 0x0     # XMETAL_StartPush 0x187C04 reads it, compares with +4, calls MakeSpace 0x187960
+CDevice_PushThreshold = 0x4     # XMETAL_StartPush 0x187C06
+CDevice_Flags         = 0xC     # Direct3D_CreateDevice 0x1862D8 ors BehaviorFlags & 0x10 into it
+CDevice_Time          = 0x1C    # D3DDevice_SetTexture 0x18564D stamps the old texture with it
+CDevice_RenderTarget  = 0x40C   # D3DDevice_GetRenderTarget 0x185485 returns it
+CDevice_Depth         = 0x410   # D3DDevice_GetDepthStencilSurface 0x1854A5 returns it
+CDevice_PixelShader   = 0x414   # D3DDevice_SetPixelShader 0x187344 stores the handle
+CDevice_VertexShader  = 0x470   # D3DDevice_SetVertexShader 0x184AD6 stores the shader object, +0x474 the handle
+CDevice_BaseVertex    = 0x478   # D3DDevice_SetIndices 0x185869 stores BaseVertexIndex
+CDevice_IndexBuffer   = 0x47C   # D3DDevice_SetIndices 0x18583A reads the old one, 0x185862 stores the new one
+CDevice_ZScale        = 0x4F8   # D3D_UpdateProjectionViewportTransform 0x1887E7 scales the Z range by it
+CDevice_SuperSampleX  = 0x500   # D3D_UpdateProjectionViewportTransform 0x188797 scales the viewport width by it
+CDevice_SuperSampleY  = 0x504   # D3D_UpdateProjectionViewportTransform 0x1887BD scales the viewport height by it
+CDevice_Transforms    = 0x880   # D3DDevice_SetTransform 0x184C51 copies 16 dwords to +0x880 + type * 64
+CDevice_Viewport      = 0xB00   # D3DDevice_SetViewport 0x1855CD to 0x1855F1 stores X, Y, Width, Height, MinZ, MaxZ
+CDevice_Textures      = 0xBA0   # D3DDevice_SetTexture 0x18563E reads, 0x185673 stores [stage]
+CDevice_Palettes      = 0xBB0   # D3DDevice_SetPalette 0x18579D reads, 0x1857D5 stores [stage]
+# The frame buffers are surfaces inside the device, 0x18 bytes each: back buffer 0, front buffer, back buffer 1.
+# D3DDevice_GetBackBuffer 0x1851FE returns +0x2150 + n * 0x18 (index -1 is 1, index n > 0 is n + 1).
+CDevice_FrameBuffers  = 0x2150
+CDevice_VBlankCallback = 0x24EC # the miniport at +0x2308: its interrupt 0x18C072 calls [miniport + 0x1E4]
+CDevice_VBlankEvent   = 0x24F0  # the interrupt 0x18C065 sets the event at miniport + 0x1E8, BlockUntilVerticalBlank 0x184D9B clears it
+CDevice_DisplayFlags  = 0x2510  # D3DDevice_Present 0x186CE2 tests 0x1000000 (interlaced field mode)
+CDevice_VBlankCount   = 0x2518  # the interrupt 0x18C042 increments miniport + 0x210, Present 0x186C41 compares it with the swaps
+CDevice_GammaRamps    = 0x251C  # the interrupt 0x18BFFA loads miniport + 0x214 + index * 0x300
+CDevice_GammaPending  = 0x2B1C  # the interrupt 0x18C009 clears [miniport + 0x814 + index * 4]
+CDevice_SwapCount     = 0x2B60  # D3DDevice_Present 0x186C6C increments it
+CDevice_Size          = 0x2B90  # D3D__pDevice 0x194020 follows the device
+# D3D8 globals
+DirtyFlags_Texture    = 0x408   # D3DDevice_SetTexture 0x1856A2 ors it into the device's dirty flags at +8
+TextureState_Stage    = 32      # D3DDevice_SetTextureStageStateNotInline 0x1833B3: [stage * 32 + type] dwords
+Stream_Size           = 12      # D3DDevice_SetStreamSource 0x18470B indexes the stream table by n * 12
+Stream_Stride         = 0x0     # D3DDevice_SetStreamSource 0x18476A stores Stride
+Stream_Buffer         = 0x8     # D3DDevice_SetStreamSource 0x184764 stores the vertex buffer
+PixelShader_Definition = 0x8    # D3DDevice_CreatePixelShader 0x187301 points +8 at the copied definition
+# D3DRS numbering of this build: 82 simple states, 34 deferred from 82, 28 complex from 116 (MultiSampleType, no
+# MultiSampleMode, MultiSampleRenderTargetMode or SampleAlpha). D3DDevice_SetRenderStateNotInline 0x182C95 splits at 82.
+RenderState_DeferredFirst = 82
+RenderState_ComplexFirst  = 116
+# XAPI XPP device type record
+XPP_Current           = 0x0     # XGetDevices 0x1CA444 returns it
+XPP_Changed           = 0x4     # XGetDevices 0x1CA446 clears it
+XPP_Previous          = 0x8     # XGetDevices 0x1CA44C copies Current into it
+# DSOUND 3936: DSBUFFERDESC and DSSTREAMDESC carry a DWORD mix bin mask, IDirectSoundBuffer_SetMixBins 0x19639A takes one
+DSound_MixBinMask     = 1
+# DSOUND effects image (dsstdfx.bin): 0x818 + (Skip0 + Skip1) * 4 = 0x4524 holds 9 effects, as in 5849
+EffectsImage_Skip0    = 0x804
+EffectsImage_Skip1    = 0x80C
+EffectsImage_Desc     = 0x818
+# D3DTSS: ColorOp..TextureTransformFlags are 0..9, AddressU..AlphaKill 10..21 (the default table 0x190220 and
+# the stage 0 setup 0x190010 of D3D_InitDefaultState 0x18B040 read that way: ColorOp 0 SelectArg1, AddressU 0xA Clamp)
+TextureState_OldOrder = 1
+# Genma marks a port present (+0x2A of its port record) only on an insertion from XGetDeviceChanges (0x1072D8),
+# so controllers arrive after XInitDevices as on the console
+XPP_LateArrival       = 1

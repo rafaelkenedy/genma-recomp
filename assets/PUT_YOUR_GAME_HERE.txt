@@ -1,0 +1,2 @@
+Put your own copy of the game here: its disc image (.iso), or default.xbe with the game's folders beside it.
+The game files are never part of this repository.
