@@ -296,3 +296,14 @@ call = "DiffBefore"
 [[hook]]
 at = 0x0EEDB8
 call = "DiffAfter"
+
+# ROOM006 character state dispatch: the register-based bound is 10 (11 states).
+# Automatic discovery mistakes [eax+0xFC2] for a translation table and keeps
+# only state 0, leaving cave transitions to 0x90E91 / 0x90FBF uncompiled.
+[[switch]]
+at = 0x00090E45
+targets = [
+    0x00090E4C, 0x00090E68, 0x00090E84, 0x00090E91,
+    0x00090EE7, 0x00090EF4, 0x00090F39, 0x00090F47,
+    0x00090FA3, 0x00090FBF, 0x00090FCC,
+]
