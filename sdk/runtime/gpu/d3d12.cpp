@@ -105,18 +105,8 @@ struct PerfScope {
 // F3 captures only with diag::CaptureDir set
 // shadow volume depth bias experiment (KeyDepthStencil): units and slope, set on the render thread only
 std::pair<int32_t, float> g_shadow_bias{0, 0.0f};
-// point sampling nudge (FillTextureConstants), on unless XBE_POINT_NUDGE=0; a file "point_nudge" holding 1 or 0
-// switches it live
-bool g_point_nudge = [] {
-    const char* e = std::getenv("XBE_POINT_NUDGE");
-    return !(e && e[0] == '0');
-}();
-// precise depth (shaders.cpp, VertexProgramHlsl), on unless XBE_PRECISE_DEPTH=0; a file "precise_depth" holding
-// 1 or 0 switches it live
-bool g_precise_depth = [] {
-    const char* e = std::getenv("XBE_PRECISE_DEPTH");
-    return !(e && e[0] == '0');
-}();
+// app::Settings::point_nudge (FillTextureConstants) and precise_depth (shaders.cpp, VertexProgramHlsl): the settings
+// file and menu, XBE_POINT_NUDGE / XBE_PRECISE_DEPTH, or a file "point_nudge" / "precise_depth" holding 1 or 0 live
 void ParseShadowBias(const char* e) {
     char* end = nullptr;
     int32_t units = int32_t(std::strtol(e, &end, 10));
@@ -2135,7 +2125,7 @@ void FillSurfaceConstants(const State& s, GuestExtent size, DrawConstants& c) {
     c.misc[1] = SimpleState(s, kMAlphaTestEnable) ? float(Cmp(SimpleState(s, kMAlphaFunc)) - 1) : kAlphaTestAlways;
     c.misc[2] = float(Cmp(s.rs[kRsShadowFunc]) - 1);
     c.misc[3] = s.rs[kRsSpecularEnable] ? 1.0f : 0.0f;
-    c.dfix[0] = g_precise_depth ? 1.0f : 0.0f;
+    c.dfix[0] = app::Get().precise_depth ? 1.0f : 0.0f;
 }
 
 void FillCombinerConstants(const State& s, DrawConstants& c) {
@@ -2176,7 +2166,7 @@ void D3D12Backend::FillTextureConstants(const State& s, const DrawShaders& sh, c
             // 4.5x), where rounding of the interpolated coordinate picks either texel and the pick changes with
             // the coordinates' offset; a fixed nudge past the error takes the same texel every frame. Genma's
             // water atlas beside the bridge (ROOM001) swapped columns of the posts each frame without it.
-            if (g_point_nudge && t[kTssMagFilter] < kTexfLinear && t[kTssMinFilter] < kTexfLinear && d.width && d.height) {
+            if (app::Get().point_nudge && t[kTssMagFilter] < kTexfLinear && t[kTssMinFilter] < kTexfLinear && d.width && d.height) {
                 c.texsize[i][2] = kPointNudgeTexels / float(d.width);
                 c.texsize[i][3] = kPointNudgeTexels / float(d.height);
             }
@@ -2998,13 +2988,12 @@ void D3D12Backend::UploadGammaRamp() {
 }
 
 void D3D12Backend::BlitFrame(Target& t) {
-    // 16:9 when the console reports a widescreen display, else 4:3
-    bool wide = app::Widescreen();
-    float aspect = wide ? 16.0f / 9.0f : 4.0f / 3.0f;
+    // the settings' aspect (app::FrameAspect), centred with bars; Stretch fills the window
+    float aspect = app::FrameAspect();
     float w = float(bb_w_);
     float h = float(bb_h_);
-    float vw = std::min(w, h * aspect);
-    float vh = vw / aspect;
+    float vw = aspect > 0 ? std::min(w, h * aspect) : w;
+    float vh = aspect > 0 ? vw / aspect : h;
     float uv[4] = {0, 0, 1, 1};
     D3D12_VIEWPORT vp{(w - vw) / 2, (h - vh) / 2, vw, vh, 0, 1};
     D3D12_RECT scissor{0, 0, LONG(bb_w_), LONG(bb_h_)};
@@ -3020,6 +3009,7 @@ void D3D12Backend::RenderUi() {
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
     if (app::kGame.ui) app::kGame.ui(fps_);
+    app::DrawMenu(fps_);
     ImGui::Render();
     ID3D12DescriptorHeap* uh[] = {ui_heap_.Get()};
     cl_->SetDescriptorHeaps(1, uh);
@@ -3156,8 +3146,8 @@ void D3D12Backend::Present(const Surface& front) {
                 fclose(f);
             }
             std::filesystem::remove(precise, ec);
-            g_precise_depth = text[0] == '1';
-            LOGI("d3d12: precise depth %s", g_precise_depth ? "on" : "off");
+            app::Get().precise_depth = text[0] == '1';
+            LOGI("d3d12: precise depth %s", app::Get().precise_depth ? "on" : "off");
         }
         auto nudge = app::ExeDir() / "point_nudge";
         if (std::filesystem::exists(nudge, ec)) {
@@ -3167,8 +3157,8 @@ void D3D12Backend::Present(const Surface& front) {
                 fclose(f);
             }
             std::filesystem::remove(nudge, ec);
-            g_point_nudge = text[0] == '1';
-            LOGI("d3d12: point sampling nudge %s", g_point_nudge ? "on" : "off");
+            app::Get().point_nudge = text[0] == '1';
+            LOGI("d3d12: point sampling nudge %s", app::Get().point_nudge ? "on" : "off");
         }
         auto skip = app::ExeDir() / "skip_draws";
         if (std::filesystem::exists(skip, ec)) {

@@ -14,7 +14,7 @@ An unofficial native Windows port of the original Xbox version of **Genma Onimus
 
 The release is made for **Genma Onimusha (USA)**, `default.xbe` SHA-1 `08bfe432eb55877b5af2dd401b713743c5b751cd` (redump). Another release of the game gets a warning before it is built.
 
-Settings are in `game/settings.toml`. The first-start log is `work/build.log`, the game's logs are in `game/logs`.
+Press **F1** in the game for the settings menu: display mode and resolution, aspect (4:3, stretch), render scale, frame rate cap, V-Sync, texture filtering and the port's fixes, applied at once; **Save** writes them to `game/settings.toml`. The first-start log is `work/build.log`, the game's logs are in `game/logs`.
 
 ### Requirements
 
@@ -24,7 +24,7 @@ Settings are in `game/settings.toml`. The first-start log is `work/build.log`, t
 
 ## Improvements over the original
 
-- Native resolution rendering with widescreen, at any output size
+- Rendering at the output's resolution (or above, as supersampling), shown in the original 4:3 with bars; the game has no widescreen mode, its backgrounds are pre-rendered 640x480 images
 - Precise depth for models: no flickering where layers of a character overlap (`docs/depth-precision.md`)
 - Stable point-sampled backgrounds when upscaled (`docs/point-sampling-nudge.md`)
 - Xbox, PlayStation and Switch controllers with hot plugging and rumble

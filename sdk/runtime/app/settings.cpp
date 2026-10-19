@@ -8,6 +8,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <atomic>
 #include <fstream>
 #include <sstream>
@@ -22,6 +23,12 @@ namespace app {
 namespace {
 
 const char* kModes[] = {"fullscreen", "borderless", "windowed"};
+const char* kAspects[] = {"auto", "4:3", "16:9", "stretch"};
+
+// XBE_PRECISE_DEPTH / XBE_POINT_NUDGE = 0 or 1 win over the file, for A/B runs
+void EnvFlag(const char* name, bool& v) {
+    if (const char* e = std::getenv(name)) v = e[0] != '0';
+}
 
 std::filesystem::path File() { return ExeDir() / kGame.settings; }
 
@@ -34,10 +41,13 @@ Settings& Get() {
 
 void Load() {
     Settings& s = Get();
+    s.aspect = kGame.aspect;
     toml::table t;
     try {
         t = toml::parse_file(File().string());
     } catch (...) {
+        EnvFlag("XBE_PRECISE_DEPTH", s.precise_depth);
+        EnvFlag("XBE_POINT_NUDGE", s.point_nudge);
         return;
     }
     std::string mode = t["display_mode"].value_or(std::string(kModes[uint32_t(s.display_mode)]));
@@ -49,6 +59,13 @@ void Load() {
     s.fps_cap = t["fps_cap"].value_or(s.fps_cap);
     s.vsync = t["vsync"].value_or(s.vsync);
     s.aniso = t["anisotropic_filtering"].value_or(s.aniso);
+    std::string aspect = t["aspect"].value_or(std::string(kAspects[uint32_t(s.aspect)]));
+    for (uint32_t i = 0; i < 4; i++)
+        if (aspect == kAspects[i]) s.aspect = Aspect(i);
+    s.precise_depth = t["precise_depth"].value_or(s.precise_depth);
+    s.point_nudge = t["point_nudge"].value_or(s.point_nudge);
+    EnvFlag("XBE_PRECISE_DEPTH", s.precise_depth);
+    EnvFlag("XBE_POINT_NUDGE", s.point_nudge);
     s.join_ip = t["join_ip"].value_or(s.join_ip);
     for (const Option& o : kGame.options) {
         if (o.flag) *o.flag = t[o.key].value_or(*o.flag);
@@ -68,6 +85,9 @@ toml::table Table() {
                   {"fps_cap", int64_t(s.fps_cap)},
                   {"vsync", s.vsync},
                   {"anisotropic_filtering", int64_t(s.aniso)},
+                  {"aspect", kAspects[uint32_t(s.aspect)]},
+                  {"precise_depth", s.precise_depth},
+                  {"point_nudge", s.point_nudge},
                   {"join_ip", s.join_ip}};
     for (const Option& o : kGame.options) {
         if (o.flag) t.insert(o.key, *o.flag);
@@ -111,16 +131,23 @@ Mode Output() {
 }
 
 bool Widescreen() {
+    const Settings& s = Get();
+    if (s.aspect == Aspect::Ratio16x9) return true;
+    if (s.aspect != Aspect::Auto) return false;
     // asked per frame and per HUD quad: the desktop mode lookup only runs when the resolution setting changes
     static std::atomic<uint64_t> key{~0ull};
     static std::atomic<bool> wide{true};
-    const Settings& s = Get();
     uint64_t k = uint64_t(s.width) << 32 | s.height;
     if (key.exchange(k) != k) {
         Mode m = Output();
         wide = m.width * 2 >= m.height * 3;  // 3:2 or wider
     }
     return wide;
+}
+
+float FrameAspect() {
+    if (Get().aspect == Aspect::Stretch) return 0;
+    return Widescreen() ? 16.0f / 9.0f : 4.0f / 3.0f;
 }
 
 float RenderScale(uint32_t guest_height) {
