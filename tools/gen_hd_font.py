@@ -18,6 +18,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 S = 4  # scale
 FILL, SHADE, SHADE2, OUTLINE = 1, 2, 3, 9
+TOP_GAP = S // 2  # empty rows at the top of each big cell, half a game pixel
 
 # big glyphs: rows of 16 cells of 16x16 from y = 32; None leaves a cell empty; a (text, cells) pair spans cells
 BIG = [
@@ -150,6 +151,10 @@ def main():
             bx0, by0, bx1, by1 = box
             place(canvas, mask, ((cx + bx0) * S, (cy + by0) * S, (cx + bx1) * S, (cy + by1) * S))
             style(canvas, ((cy) * S, (cy + 16) * S, (cx) * S, (cx + 16 * span) * S))
+        # the game's glyph quads end on the cell's bottom edge; above 480p the filter reads a sliver of the next cell
+        # row, so the top of every cell stays empty: the outline of the glyph below no longer shows as a dash under
+        # the text (the original font does it too, at high resolution)
+        canvas[(32 + r * 16) * S:(32 + r * 16) * S + TOP_GAP] = 0
 
     # small glyphs: thin, fill only, as the game's (indices 1 and 5)
     for r, row in enumerate(SMALL):

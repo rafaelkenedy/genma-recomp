@@ -94,6 +94,7 @@ Falta: a função que monta os quads dos caracteres (caractere → célula, somb
 - de cada célula do atlas original, o gerador lê só a **caixa** da letra (posição e tamanho), que é o layout que o jogo usa;
 - desenha o mesmo caractere com a fonte livre, ajustado a essa caixa em 4×;
 - aplica o estilo do original: preenchimento (1), sombreado no pé dos traços (2 e 3) e contorno escuro de um pixel do jogo (9).
+- deixa vazio meio pixel do jogo no topo de cada célula: o jogo desenha cada letra até a borda de baixo da célula, e acima de 480p o filtro lê um fio da fileira de baixo, que aparecia como um traço preto sob o texto (Opções: *Voice Volume*, *S.E. Volume*). A fonte original faz o mesmo em alta resolução.
 
 Nenhum pixel da fonte da Capcom vai para o arquivo, e por isso ele está no repositório, com a licença em `textures/FONT-LICENSE.txt`.
 
