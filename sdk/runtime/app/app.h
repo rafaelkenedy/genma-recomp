@@ -29,6 +29,7 @@ struct Settings {
     bool vsync = true;
     uint32_t aniso = 0;              // 0 as the game asks
     Aspect aspect = Aspect::Auto;    // GameInfo::aspect before the settings file
+    float overscan = 0;              // percent of the frame cut from each edge, as a TV's overscan hid; GameInfo::overscan
     bool precise_depth = true;       // vertex programs' depth without the z / w cancellation (gpu/shaders.cpp)
     bool point_nudge = true;         // point sampled textures take the same texel at edges when upscaled
     std::string join_ip;                   // co-op: a host past the LAN the system link search also asks
@@ -108,6 +109,7 @@ struct GameInfo {
     void (*pad)(int port, input::Pad& pad);  // a polled pad before the game gets it
     void (*rumble)(int port, uint16_t& left, uint16_t& right);
     Aspect aspect = Aspect::Auto;  // the default before the settings file; Ratio4x3 for games without widescreen
+    float overscan = 0;            // the default overscan cut, percent per edge: a game's black frame for TV overscan
 };
 extern const GameInfo kGame;
 

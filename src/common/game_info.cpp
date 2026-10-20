@@ -24,4 +24,5 @@ const app::GameInfo app::kGame = {
     .pad = AutopilotPad,                     // changes a polled pad
     .rumble = nullptr,                    // changes a rumble before it is set
     .aspect = app::Aspect::Ratio4x3,      // 640x480 pre-rendered backgrounds, never drawn widescreen
+    .overscan = 100.0f / 30,              // the game draws inside a black frame of 1/30 per edge (21 x 16 of 640x480)
 };

@@ -42,6 +42,7 @@ Settings& Get() {
 void Load() {
     Settings& s = Get();
     s.aspect = kGame.aspect;
+    s.overscan = kGame.overscan;
     toml::table t;
     try {
         t = toml::parse_file(File().string());
@@ -62,6 +63,7 @@ void Load() {
     std::string aspect = t["aspect"].value_or(std::string(kAspects[uint32_t(s.aspect)]));
     for (uint32_t i = 0; i < 4; i++)
         if (aspect == kAspects[i]) s.aspect = Aspect(i);
+    s.overscan = std::clamp(float(t["overscan"].value_or(double(s.overscan))), 0.0f, 15.0f);
     s.precise_depth = t["precise_depth"].value_or(s.precise_depth);
     s.point_nudge = t["point_nudge"].value_or(s.point_nudge);
     EnvFlag("XBE_PRECISE_DEPTH", s.precise_depth);
@@ -86,6 +88,7 @@ toml::table Table() {
                   {"vsync", s.vsync},
                   {"anisotropic_filtering", int64_t(s.aniso)},
                   {"aspect", kAspects[uint32_t(s.aspect)]},
+                  {"overscan", double(s.overscan)},
                   {"precise_depth", s.precise_depth},
                   {"point_nudge", s.point_nudge},
                   {"join_ip", s.join_ip}};

@@ -84,6 +84,9 @@ void Display(Settings& s) {
         }
         ImGui::EndCombo();
     }
+    ImGui::SliderFloat("Overscan crop", &s.overscan, 0.0f, 10.0f, "%.1f%%");
+    Help("Cuts this share off every edge and enlarges the rest, as a TV did. Games left a black frame for it;\n"
+         "cutting it lets the picture reach the top and bottom of the screen. 0% shows the whole console frame.");
     const char* aspects[] = {"Auto", "4:3", "16:9", "Stretch"};
     int aspect = int(s.aspect);
     if (ImGui::Combo("Aspect", &aspect, aspects, 4)) s.aspect = Aspect(aspect);

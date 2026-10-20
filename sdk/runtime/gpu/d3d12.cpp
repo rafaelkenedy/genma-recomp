@@ -2994,7 +2994,9 @@ void D3D12Backend::BlitFrame(Target& t) {
     float h = float(bb_h_);
     float vw = aspect > 0 ? std::min(w, h * aspect) : w;
     float vh = aspect > 0 ? vw / aspect : h;
-    float uv[4] = {0, 0, 1, 1};
+    // the overscan cut: the same share off every edge keeps the frame's shape, its middle fills the area
+    float cut = std::clamp(app::Get().overscan, 0.0f, 15.0f) / 100.0f;
+    float uv[4] = {cut, cut, 1 - 2 * cut, 1 - 2 * cut};
     D3D12_VIEWPORT vp{(w - vw) / 2, (h - vh) / 2, vw, vh, 0, 1};
     D3D12_RECT scissor{0, 0, LONG(bb_w_), LONG(bb_h_)};
     cl_->RSSetViewports(1, &vp);
