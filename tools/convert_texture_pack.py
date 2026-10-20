@@ -107,6 +107,46 @@ def colour_fit(pack_small, port):
     return fit
 
 
+def convert(task):
+    """one matched texture: the pack image, colours fitted to the port's, written as DDS (or PNG without texconv)"""
+    row, src, port_path, out_stem, out, texconv, no_colour = task
+    port = Image.open(port_path).convert('RGBA')
+    w, hgt = port.size
+    hd = Image.open(src).convert('RGBA')
+    port_a = np.asarray(port, np.float32)
+    hd_a = np.asarray(hd, np.float32).copy()
+    fit = [(1.0, 0.0)] * 3 if no_colour else colour_fit(np.asarray(hd.resize((w, hgt), Image.BOX), np.float32), port_a)
+    row['colour'] = ' '.join(f'{a:.3f}*x{b:+.1f}' for a, b in fit)
+    identity = all(abs(a - 1) < 0.03 and abs(b) < 3 for a, b in fit)
+    opaque = port_a[..., 3].min() >= 250
+    out_dds = os.path.join(out, out_stem + '.dds')
+    if identity and (not opaque or hd_a[..., 3].min() >= 250):
+        shutil.copyfile(src, out_dds)
+        row['result'] = 'copied'
+        return row
+    for c, (a, b) in enumerate(fit):
+        hd_a[..., c] = np.clip(hd_a[..., c] * a + b, 0, 255)
+    if opaque:
+        hd_a[..., 3] = 255
+    img = Image.fromarray(hd_a.astype(np.uint8), 'RGBA')
+    if not (texconv and os.path.exists(texconv)):
+        img.save(os.path.join(out, out_stem + '.png'))
+        row['result'] = 'colour fitted, PNG (no texconv)'
+        return row
+    with tempfile.TemporaryDirectory(dir=out) as tmp:  # beside the output: the PNG of a 4K texture is tens of MB
+        png = os.path.join(tmp, 'tex.png')
+        img.save(png)
+        fmt = 'BC1_UNORM' if opaque else 'BC3_UNORM'
+        r = subprocess.run([texconv, '-nologo', '-y', '-f', fmt, '-m', '0', '-o', tmp, png], capture_output=True, text=True)
+        made = os.path.join(tmp, 'tex.dds')
+        if r.returncode or not os.path.exists(made):
+            row['result'] = 'texconv failed: ' + (r.stdout + r.stderr).strip()[-200:]
+            return row
+        shutil.move(made, out_dds)
+    row['result'] = 'colour fitted, ' + ('BC1' if opaque else 'BC3')
+    return row
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('dump')
@@ -116,12 +156,13 @@ def main():
     ap.add_argument('--min-score', type=float, default=0.97)
     ap.add_argument('--no-colour', action='store_true')
     ap.add_argument('--force', action='store_true', help='convert again textures already in out')
+    ap.add_argument('--jobs', type=int, default=max(1, (os.cpu_count() or 2) - 1))
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     names, sizes, thumbs = pack_index(args.pack, os.path.join(args.out, '.pack_thumbs.npz'))
     tn = normalized(thumbs)
     dumps = sorted(f for f in os.listdir(args.dump) if f.lower().endswith('.png') and not f.lower().endswith('.idx.png'))
-    rows = []
+    rows, tasks = [], []
     for f in dumps:
         h = f[:16].upper()
         stem = f[:-4]
@@ -153,43 +194,14 @@ def main():
             row['result'] = 'no match'
             rows.append(row)
             continue
-        src = os.path.join(args.pack, names[k])
-        hd = Image.open(src).convert('RGBA')
-        port_a = np.asarray(port, np.float32)
-        hd_a = np.asarray(hd, np.float32)
-        fit = [(1.0, 0.0)] * 3 if args.no_colour else colour_fit(np.asarray(hd.resize((w, hgt), Image.BOX), np.float32), port_a)
-        row['colour'] = ' '.join(f'{a:.3f}*x{b:+.1f}' for a, b in fit)
-        identity = all(abs(a - 1) < 0.03 and abs(b) < 3 for a, b in fit)
-        opaque = port_a[..., 3].min() >= 250
-        out_dds = os.path.join(args.out, out_stem + '.dds')
-        if identity and (not opaque or hd_a[..., 3].min() >= 250):
-            shutil.copyfile(src, out_dds)
-            row['result'] = 'copied'
-        else:
-            for c, (a, b) in enumerate(fit):
-                hd_a[..., c] = np.clip(hd_a[..., c] * a + b, 0, 255)
-            if opaque:
-                hd_a[..., 3] = 255
-            img = Image.fromarray(hd_a.astype(np.uint8), 'RGBA')
-            if args.texconv and os.path.exists(args.texconv):
-                with tempfile.TemporaryDirectory() as tmp:
-                    png = os.path.join(tmp, 'tex.png')
-                    img.save(png)
-                    fmt = 'BC1_UNORM' if opaque else 'BC3_UNORM'
-                    r = subprocess.run([args.texconv, '-nologo', '-y', '-f', fmt, '-m', '0', '-o', tmp, png],
-                                       capture_output=True, text=True)
-                    made = os.path.join(tmp, 'tex.dds')
-                    if r.returncode or not os.path.exists(made):
-                        row['result'] = 'texconv failed: ' + (r.stdout + r.stderr).strip()[-200:]
-                        rows.append(row)
-                        continue
-                    shutil.move(made, out_dds)
-                row['result'] = 'colour fitted, ' + ('BC1' if opaque else 'BC3')
-            else:
-                img.save(os.path.join(args.out, out_stem + '.png'))
-                row['result'] = 'colour fitted, PNG (no texconv)'
-        rows.append(row)
-        print(f"{out_stem} {row['port_size']:>9} <- {names[k]} {row['pack_size']} {best:.3f} {row['result']}", flush=True)
+        tasks.append((row, os.path.join(args.pack, names[k]), os.path.join(args.dump, f), out_stem, args.out,
+                      args.texconv, args.no_colour))
+    # the conversions in parallel: each decodes a large DDS, fits it and runs texconv
+    with ProcessPoolExecutor(args.jobs) as ex:
+        for row in ex.map(convert, tasks):
+            rows.append(row)
+            print(f"{row['hash']} {row['port_size']:>9} <- {row['pack_file']} {row['pack_size']} {row['score']} "
+                  f"{row['result']}", flush=True)
     with open(os.path.join(args.out, 'pack_report.csv'), 'w', newline='') as fh:
         wr = csv.DictWriter(fh, fieldnames=['hash', 'port_size', 'pack_file', 'pack_size', 'score', 'colour', 'result'])
         wr.writeheader()
