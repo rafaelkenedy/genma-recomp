@@ -4,6 +4,9 @@ Como converter um pacote de texturas feito para outra versão do jogo (por exemp
 Onimusha: Warlords, de Evgeshajk) para a troca de texturas deste port. As texturas convertidas ficam no seu PC: nada
 derivado de um pacote entra neste repositório ou nas releases.
 
+A conversão pronta do pacote de Evgeshajk está em [GenmaOnimusha-HD-textures.zip](https://drive.google.com/file/d/1oE0Cfq00ih_nQ7XcCPSXXHFNbc89uzmk/view?usp=sharing) (cerca de 9,9 GB): extraia na
+pasta `game` da release, para os arquivos ficarem em `game/textures/`.
+
 ## Como o port acha uma textura HD
 
 - Cada textura do jogo é identificada pelo hash dos bytes do nível 0 (`gpu::Hash`, `sdk/runtime/gpu/replace.h`).
