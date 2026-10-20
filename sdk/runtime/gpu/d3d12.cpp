@@ -33,6 +33,7 @@
 #include "core/log.h"
 #include "gpu/backend.h"
 #include "gpu/ext.h"
+#include "gpu/replace.h"
 #include "gpu/shaders.h"
 #include "gpu/texture.h"
 #include "gpu/vertex.h"
@@ -333,6 +334,7 @@ struct Tex {
     uint64_t frame = 0;
     uint64_t palette = 0;  // hash of the colours a P8 texture was decoded with
     uint8_t flags = 0;  // Extension::Decoded's
+    uint64_t replaced = 0;  // the content hash of the HD replacement res holds (replace.h), 0 for the game's own
 };
 
 struct PsoKey {
@@ -517,6 +519,7 @@ private:
     void UploadTexture(Tex& tx, const TextureDesc& d, const FormatInfo& fi, const uint8_t* p, const uint32_t* colours,
                        bool same);
     void UploadTextureLevel(Tex& tx, uint32_t f, uint32_t l, const std::vector<uint8_t>& px, uint32_t pitch);
+    bool UploadReplacement(Tex& tx, uint64_t content, const Replacement& r, const uint32_t* colours);
     void EnsurePixelShader(const PixelKey& pk, DrawShaders& sh);
     void BuildPipelineKey(const State& s, const Assembled& a, uint64_t vh, uint64_t ph, PsoKey& k);
     void KeyDepthStencil(const State& s, const Assembled& a, PsoKey& k);
@@ -1775,6 +1778,37 @@ void D3D12Backend::UploadTexture(Tex& tx, const TextureDesc& d, const FormatInfo
     Transition(tx.res.Get(), st, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 }
 
+// an HD replacement in place of the game's texture: its own size, BGRA, with its mip chain
+bool D3D12Backend::UploadReplacement(Tex& tx, uint64_t content, const Replacement& r, const uint32_t* colours) {
+    std::vector<std::vector<uint8_t>> levels = ReplacementLevels(r, colours);
+    bool fresh = tx.replaced != content || !tx.res;
+    if (fresh) {
+        if (tx.res) CurrentFrame().garbage.push_back(tx.res);
+        tx.res.Reset();
+        D3D12_HEAP_PROPERTIES hp{D3D12_HEAP_TYPE_DEFAULT};
+        D3D12_RESOURCE_DESC td = Texture2DDesc(DXGI_FORMAT_B8G8R8A8_UNORM, r.w, r.h);
+        td.MipLevels = UINT16(levels.size());
+        if (FAILED(dev_->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &td, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                                                 IID_PPV_ARGS(&tx.res))))
+            return false;
+        tx.fmt = DXGI_FORMAT_B8G8R8A8_UNORM;
+        tx.levels = uint32_t(levels.size());
+        tx.replaced = content;
+    } else {
+        D3D12_RESOURCE_STATES cur = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        Transition(tx.res.Get(), cur, D3D12_RESOURCE_STATE_COPY_DEST);
+    }
+    uint32_t w = r.w, h = r.h;
+    for (uint32_t l = 0; l < tx.levels; l++) {
+        UploadTextureLevel(tx, 0, l, levels[l], w * 4);
+        w = std::max(w / 2, 1u);
+        h = std::max(h / 2, 1u);
+    }
+    D3D12_RESOURCE_STATES st = D3D12_RESOURCE_STATE_COPY_DEST;
+    Transition(tx.res.Get(), st, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    return true;
+}
+
 void FillTextureView(const Tex& tx, const TextureDesc& d, D3D12_SHADER_RESOURCE_VIEW_DESC& sv) {
     sv.Format = tx.fmt;
     if (d.cube) {
@@ -1827,14 +1861,38 @@ ID3D12Resource* D3D12Backend::BindGuestTexture(const State& s, int stage, const 
         tx.palette = palette.hash;
         const uint8_t* p = static_cast<const uint8_t*>(kernel::HostPtr(d.data));
         auto perf_t = PerfClock::now();
-        uint64_t sig = MemSig(d.data, total) ^ DirtyEpoch(d.data) ^ palette.hash;
+        // the HD textures setting is part of the signature: switching it uploads again
+        const bool hd = app::Get().hd_textures;
+        uint64_t sig = MemSig(d.data, total) ^ DirtyEpoch(d.data) ^ palette.hash ^ (hd ? 0x5BD1E995ull : 0);
         g_perf.sig += PerfMs(perf_t);
         if (sig != tx.sig || !same) {
             PerfScope perf_up{g_perf.texup};
             g_perf.texups++;
             g_perf.texup_bytes += total;
-            tx.sig = sig;
-            UploadTexture(tx, d, fi, p, palette.va ? palette.colours : nullptr, same);
+            const uint32_t* colours = palette.va ? palette.colours : nullptr;
+            // HD replacement by the content of level 0 as the game stores it (P8: the indices alone)
+            const Replacement* rep = nullptr;
+            uint64_t content = 0;
+            bool replaceable = !d.linear && !d.cube && d.depth == 1;
+            if (replaceable && (hd || DumpTextures())) {
+                content = Hash(p, LevelSize(d, 0));
+                if (DumpTextures()) DumpTexture(content, d, p, colours);
+                if (hd) rep = FindReplacement(content);
+            }
+            if (rep && UploadReplacement(tx, content, *rep, colours)) {
+                tx.sig = sig;
+            } else {
+                if (tx.replaced) {
+                    // back to the game's own size and levels
+                    uint64_t frame = tx.frame, pal = tx.palette;
+                    if (!CreateTexture(tx, d, fi, key)) return nullptr;
+                    tx.frame = frame;
+                    tx.palette = pal;
+                    same = false;
+                }
+                tx.sig = sig;
+                UploadTexture(tx, d, fi, p, colours, same);
+            }
         }
     }
     FillTextureView(tx, d, stages.sv[stage]);

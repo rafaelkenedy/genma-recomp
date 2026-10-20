@@ -66,6 +66,7 @@ void Load() {
     s.overscan = std::clamp(float(t["overscan"].value_or(double(s.overscan))), 0.0f, 15.0f);
     s.precise_depth = t["precise_depth"].value_or(s.precise_depth);
     s.point_nudge = t["point_nudge"].value_or(s.point_nudge);
+    s.hd_textures = t["hd_textures"].value_or(s.hd_textures);
     EnvFlag("XBE_PRECISE_DEPTH", s.precise_depth);
     EnvFlag("XBE_POINT_NUDGE", s.point_nudge);
     s.join_ip = t["join_ip"].value_or(s.join_ip);
@@ -91,6 +92,7 @@ toml::table Table() {
                   {"overscan", double(s.overscan)},
                   {"precise_depth", s.precise_depth},
                   {"point_nudge", s.point_nudge},
+                  {"hd_textures", s.hd_textures},
                   {"join_ip", s.join_ip}};
     for (const Option& o : kGame.options) {
         if (o.flag) t.insert(o.key, *o.flag);

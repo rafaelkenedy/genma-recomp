@@ -25,6 +25,10 @@ foreach(f README.md LICENSE THIRD_PARTY.txt)
     endif()
 endforeach()
 file(COPY ${SDK}/THIRD_PARTY.txt DESTINATION ${PKG}/sdk)
+# HD texture replacements: beside the game exe the launcher builds into game/
+if(EXISTS ${GAME}/textures)
+    file(COPY ${GAME}/textures DESTINATION ${PKG}/game)
+endif()
 file(COPY ${SDK}/LICENSE DESTINATION ${PKG}/sdk)
 file(WRITE ${PKG}/assets/PUT_YOUR_GAME_HERE.txt
     "Put your own copy of the game here: its disc image (.iso), or default.xbe with the game's folders beside it.\n"

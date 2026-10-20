@@ -79,6 +79,34 @@ Como o corte é por teste de alfa sobre uma textura ampliada com filtro linear, 
 
 Falta: a função que monta os quads dos caracteres (caractere → célula, sombra, escala).
 
+## Fonte HD (implementada)
+
+**Troca de texturas no runtime** (`sdk/runtime/gpu/replace.h/.cpp`, no estilo do RT64):
+
+- Quando o renderer envia uma textura do jogo para a GPU, calcula o hash (`gpu::Hash`) dos bytes do nível 0 como o jogo os guarda; nas texturas P8, só os índices.
+- Se existir `textures/<hash>.png` (BGRA) ou `textures/<hash>.idx.png` (índices em tons de cinza) ao lado do exe, a textura é criada no tamanho do arquivo, com a cadeia de mipmaps. Um `.idx.png` passa pela **paleta do jogo** no envio, então cores, alfa e trocas de paleta continuam as do jogo.
+- As coordenadas são normalizadas, então uma textura maior encaixa sem mudar o jogo. Texturas lineares, cubos e volumes ficam de fora.
+- `XBE_DUMP_TEXTURES=1` grava cada textura uma vez em `textures_dump/<hash>.png` (e `.idx.png` nas P8), para descobrir os nomes.
+- A configuração `hd_textures` (F1 → *HD textures*) liga e desliga ao vivo, porque faz parte da assinatura de mudança da textura.
+
+**O atlas** `textures/E21310868617436E.idx.png` (1024×1024, 4×) é a `mojist_e` página 0. O hash foi confirmado pela exportação: os índices batem 100% com o arquivo. Ele é gerado por `tools/gen_hd_font.py` com a **M PLUS Rounded 1c** (OFL; Bold para a fonte grande, Medium para a pequena):
+
+- de cada célula do atlas original, o gerador lê só a **caixa** da letra (posição e tamanho), que é o layout que o jogo usa;
+- desenha o mesmo caractere com a fonte livre, ajustado a essa caixa em 4×;
+- aplica o estilo do original: preenchimento (1), sombreado no pé dos traços (2 e 3) e contorno escuro de um pixel do jogo (9).
+
+Nenhum pixel da fonte da Capcom vai para o arquivo, e por isso ele está no repositório, com a licença em `textures/FONT-LICENSE.txt`.
+
+Resultado em 4K na tela de Opções: letras com contorno liso, no lugar dos degraus de ~5,6 px.
+
+Para regenerar:
+
+```
+python tools/gen_hd_font.py assets/image/etc/mojist_e.ldt MPLUSRounded1c-Bold.ttf MPLUSRounded1c-Medium.ttf textures/E21310868617436E.idx.png
+```
+
+Ainda sem versão HD: a página 1 (kanji) do `mojist_e`, as fontes `mojist_j`/`mojist_p` e as imagens com texto pronto.
+
 ## O que outros projetos já fizeram (pesquisa de 19/10/2026)
 
 - **Genma Onimusha (Xbox):** nenhum mod, tradução, pacote de texturas ou fonte encontrado.

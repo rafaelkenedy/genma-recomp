@@ -98,6 +98,11 @@ function(add_xbe_image target xbe config partitions game_dir)
     target_link_libraries(${target} PRIVATE tomlplusplus::tomlplusplus $<LINK_ONLY:SDL3::SDL3-static> d3d12 dxgi dxguid d3dcompiler ${xaudio} ole32 windowscodecs dbghelp winmm dwmapi ws2_32)
     # lld keeps the recompiled weak functions overridable by the host ones
     target_link_options(${target} PRIVATE -fuse-ld=lld -g)
+    # the game's HD texture replacements (gpu/replace.h) beside the exe
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/textures)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/textures $<TARGET_FILE_DIR:${target}>/textures)
+    endif()
 endfunction()
 
 # Release without game code: what a player's PC needs to build the game from its own xbe, and nothing of the game.
