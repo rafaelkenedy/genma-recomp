@@ -2,7 +2,7 @@
 
 An unofficial native Windows port of the original Xbox version of **Genma Onimusha**, made by statically recompiling the game's executable to C++ with [Xbox XBE Recomp](https://github.com/TGP482/XboxXBERecomp).
 
-**Latest release: [v0.2.0](../../releases/tag/v0.2.0)** · [all releases](../../releases)
+**Latest release: [v0.2.1](../../releases/tag/v0.2.1)** · [all releases](../../releases)
 
 > [!IMPORTANT]
 > This repository and its releases contain **no game code and no game assets**. You need your own legally acquired copy of the game. The release builds the game's code on your PC, from your copy, on the first start.
@@ -61,6 +61,7 @@ Logs: the first start writes `work/build.log`, the game writes `game/logs/`.
 
 | Version | What |
 | --- | --- |
+| [v0.2.1](../../releases/tag/v0.2.1) | fixes the crash when entering room 100 |
 | [v0.2.0](../../releases/tag/v0.2.0) | F1 settings menu; 4:3 with bars by default (it was stretched on wide screens); overscan frame cut with the Original option; Esc asks before quitting |
 | [v0.1.1](../../releases/tag/v0.1.1) | fixes the crash when entering the cave |
 | [v0.1.0](../../releases/tag/v0.1.0) | first release: the launcher builds the game from your own disc image |
