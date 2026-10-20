@@ -52,6 +52,33 @@ Conclusão: o jogo tem **uma fonte de verdade** (`mojist_*`, glifos 16×16 compo
 2. **Fonte em alta resolução para o `mojist_*`**: como os glifos estão numa grade fixa de 16×16, dá para gerar um atlas 4× ou 8× maior **a partir de uma fonte livre** (licença aberta), com o mesmo layout, e o runtime trocar a textura ao reconhecê-la. Como as coordenadas são normalizadas, o atlas maior serve sem mudar o jogo. O atlas gerado não deriva da arte da Capcom, então pode ir no repositório.
 3. **Troca de texturas em geral** (como o Dolphin): o runtime exporta cada textura com um código, o usuário põe versões em alta resolução numa pasta. Serve para os títulos e frases prontas; os pacotes de texturas ficam fora do repositório.
 
+## A fonte em jogo: tela de Opções
+
+Captura `out/build/release/captures/222443` (15 eventos).
+
+- **Todo o texto da tela vem da `mojist_e` página 0**, carregada como a textura `833E5000`, idêntica ao arquivo decodificado.
+- **Um único desenho (0009) escreve todo o texto:** 552 vértices em quads, ou seja, 138 quads para 69 caracteres. Cada caractere é desenhado duas vezes, uma como **sombra** deslocada e outra como letra; daí o contorno escuro.
+- **Estado do desenho:**
+  - formato `B` = **P8**: a fonte de 4 bits vira 8 bits com paleta;
+  - **filtro linear** (mag, min e mip);
+  - **blend desligado**, com a borda das letras cortada pelo **teste de alfa** (bordas duras, sem suavização);
+  - vértices pré-transformados (FVF `0x144`).
+- **Tamanho:** linhas de 17 a 20 px de altura no quadro de 640×480, a cada ~29 px. As células de 16×16 são desenhadas cerca de 1,25× maiores. Em 4K, cada texel da fonte vira ~5,6 px.
+- Os outros elementos: `82EDD000` (256×256) é a folha da interface (marcadores, setas, barra de volume). O título "Options" e a moldura são imagens prontas.
+
+Como o corte é por teste de alfa sobre uma textura ampliada com filtro linear, em 4K a borda das letras fica em degraus, e não macia.
+
+## No código
+
+| Endereço | O quê |
+| --- | --- |
+| `0x1E5860` | tabela com os nomes dos 1.588 arquivos do jogo: `MOJI` = 434 (0x1B2), `MOJIST_P` = 435, `MOJIST_E` = 436 (0x1B4), `MOJIST_J` = 437 (0x1B5) |
+| `0x164D0(índice)` | carrega um arquivo da tabela no buffer compartilhado (`[0x55482C]`) e chama `0x15F60`, que interpreta o `LINK`/`OIM` e cria as texturas; é o carregador genérico de `.ldt` |
+| `0xE36C0` | inicialização do jogo: carrega o `MOJIST_E` (índice 0x1B4) |
+| `0xDB1A0` | troca a fonte conforme o idioma: `MOJIST_J` se o campo `[obj+0x7BD0]` for 0, senão `MOJIST_E` |
+
+Falta: a função que monta os quads dos caracteres (caractere → célula, sombra, escala).
+
 ## O que outros projetos já fizeram (pesquisa de 19/10/2026)
 
 - **Genma Onimusha (Xbox):** nenhum mod, tradução, pacote de texturas ou fonte encontrado.
@@ -72,6 +99,6 @@ Fontes: [RT64](https://github.com/rt64/rt64), [RT64 texture packs](https://githu
 
 ## Pendente
 
-- Capturar o texto **durante o jogo** (status, diálogo, inventário) para confirmar onde o `mojist_*` é desenhado, com qual filtro e tamanho de tela.
+- Capturar outras telas com texto (diálogo, inventário, status) para ver se usam a mesma fonte e o mesmo desenho.
 - Decodificar `FILE**`, `*_title`, `*_tegami` e `*_gm_ini`.
-- Achar no código a função que desenha os glifos (texturas do `mojist`), e como mapeia caractere → célula.
+- Achar a função que monta os quads dos caracteres (caractere → célula, sombra, escala).
