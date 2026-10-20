@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <set>
 #include <string>
@@ -84,9 +85,21 @@ void Display(Settings& s) {
         }
         ImGui::EndCombo();
     }
-    ImGui::SliderFloat("Overscan crop", &s.overscan, 0.0f, 10.0f, "%.1f%%");
-    Help("Cuts this share off every edge and enlarges the rest, as a TV did. Games left a black frame for it;\n"
-         "cutting it lets the picture reach the top and bottom of the screen. 0% shows the whole console frame.");
+    // overscan presets: the console's whole frame, the game's own cut (GameInfo::overscan), or a chosen share
+    static bool custom = false;
+    const float fill = kGame.overscan > 0 ? kGame.overscan : 3.5f;  // a common TV's overscan without a game value
+    int frame = custom ? 2 : s.overscan == 0 ? 0 : std::abs(s.overscan - fill) < 0.01f ? 1 : 2;
+    const char* frames[] = {"Original (console frame)", "Fill screen (frame cut)", "Custom"};
+    if (ImGui::Combo("Picture", &frame, frames, 3)) {
+        custom = frame == 2;
+        if (frame == 0) s.overscan = 0;
+        if (frame == 1) s.overscan = fill;
+    }
+    Help("Games drew inside a black frame that a TV's overscan hid.\n"
+         "Original: the whole console frame with that border, as the Xbox puts out.\n"
+         "Fill screen: the frame cut and the rest enlarged, so the picture reaches the top and bottom.\n"
+         "Custom: choose the share cut from every edge.");
+    if (frame == 2) ImGui::SliderFloat("Overscan crop", &s.overscan, 0.0f, 10.0f, "%.1f%%");
     const char* aspects[] = {"Auto", "4:3", "16:9", "Stretch"};
     int aspect = int(s.aspect);
     if (ImGui::Combo("Aspect", &aspect, aspects, 4)) s.aspect = Aspect(aspect);
