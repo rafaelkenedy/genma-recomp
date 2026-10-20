@@ -45,7 +45,7 @@ Logs: the first start writes `work/build.log`, the game writes `game/logs/`.
 
 ### HD textures (optional)
 
-A separate download: [GenmaOnimusha-HD-textures.zip](https://drive.google.com/file/d/1oE0Cfq00ih_nQ7XcCPSXXHFNbc89uzmk/view?usp=sharing) (about 9.9 GB). It is a conversion of the "4K Texture Pack AI-Enhanced" (Nexus Mods) for Onimusha: Warlords by **Evgeshajk**, matched to the Xbox textures: about 1,180 of the 1,284 backgrounds, plus the animations (smoke, water).
+A separate download: [GenmaOnimusha-HD-textures.zip](https://drive.google.com/file/d/1oE0Cfq00ih_nQ7XcCPSXXHFNbc89uzmk/view?usp=sharing) (about 9.9 GB). It is a conversion of the "4K Texture Pack AI-Enhanced" (Nexus Mods) for Onimusha: Warlords by **Evgeshajk**, matched to the Xbox textures: about 1,180 of the 1,284 backgrounds, plus the animations.
 
 1. Start the game once, so the `game` folder exists.
 2. Extract the zip into the `game` folder: the files end up in `game/textures/`.
