@@ -14,6 +14,12 @@ struct Pad;
 namespace app {
 
 enum class DisplayMode : uint32_t { Fullscreen, Borderless, Windowed };
+// how the console's frame fills the window:
+//   Auto      16:9 when the output is 3:2 or wider (the console reports a widescreen TV), else 4:3
+//   Ratio4x3  4:3 with bars, a 4:3 TV; for games that never draw widescreen
+//   Ratio16x9 16:9, a widescreen TV
+//   Stretch   the whole window, the console told 4:3
+enum class Aspect : uint32_t { Auto, Ratio4x3, Ratio16x9, Stretch };
 
 struct Settings {
     DisplayMode display_mode = DisplayMode::Borderless;
@@ -22,6 +28,10 @@ struct Settings {
     uint32_t fps_cap = 60;           // 0 unlimited
     bool vsync = true;
     uint32_t aniso = 0;              // 0 as the game asks
+    Aspect aspect = Aspect::Auto;    // GameInfo::aspect before the settings file
+    float overscan = 0;              // percent of the frame cut from each edge, as a TV's overscan hid; GameInfo::overscan
+    bool precise_depth = true;       // vertex programs' depth without the z / w cancellation (gpu/shaders.cpp)
+    bool point_nudge = true;         // point sampled textures take the same texel at edges when upscaled
     std::string join_ip;                   // co-op: a host past the LAN the system link search also asks
 };
 
@@ -37,8 +47,16 @@ struct Mode {
 Mode Desktop();
 Mode Output();
 float RenderScale(uint32_t guest_height);
-// the output is 3:2 or wider: the console reports a widescreen TV and the frame is shown 16:9, else 4:3 as on a 4:3 TV
+// the console reports a widescreen TV: Aspect 16:9, or Auto with an output 3:2 or wider
 bool Widescreen();
+// the window area the frame fills, width / height; 0 for the whole window (Stretch)
+float FrameAspect();
+
+// the settings menu (menu.cpp), F1: display, aspect, render scale, pacing, filtering, port fixes, game options
+bool MenuOpen();
+void ToggleMenu();          // window thread
+void AskQuit();             // window thread, Esc: the quit confirmation, or closes it when it is up
+void DrawMenu(double fps);  // inside the ImGui frame, UiLock held
 
 std::filesystem::path ExeDir();
 // the game in assets (game_files.cpp): its folder and this executable's xbe, from the extracted files or a disc
@@ -90,6 +108,8 @@ struct GameInfo {
     void (*ui)(double fps);        // each frame inside the ImGui frame, UiLock held
     void (*pad)(int port, input::Pad& pad);  // a polled pad before the game gets it
     void (*rumble)(int port, uint16_t& left, uint16_t& right);
+    Aspect aspect = Aspect::Auto;  // the default before the settings file; Ratio4x3 for games without widescreen
+    float overscan = 0;            // the default overscan cut, percent per edge: a game's black frame for TV overscan
 };
 extern const GameInfo kGame;
 

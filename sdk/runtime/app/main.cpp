@@ -10,6 +10,7 @@
 #include <timeapi.h>
 
 #include <algorithm>
+#include <cmath>
 #include <chrono>
 #include <csignal>
 #include <cwchar>
@@ -128,6 +129,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_KEYDOWN:
             if (wp == VK_F3) DumpThreads();
+            // not on auto-repeat: a held key acts once
+            if (!(lp & (1 << 30))) {
+                if (wp == VK_F1) ToggleMenu();
+                if (wp == VK_ESCAPE) AskQuit();
+            }
             return 0;
         case WM_ACTIVATE:
             if (LOWORD(wp) == WA_INACTIVE) {
@@ -258,6 +264,16 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
+    // sized for the monitor: the default 13 px font at 1080 lines, larger above
+    {
+        RECT r{};
+        GetWindowRect(GetDesktopWindow(), &r);
+        float scale = std::max(1.0f, float(r.bottom - r.top) / 1080.0f);
+        ImFontConfig font;
+        font.SizePixels = std::round(13.0f * scale);
+        io.Fonts->AddFontDefault(&font);
+        ImGui::GetStyle().ScaleAllSizes(scale);
+    }
     ImGui_ImplWin32_Init(app::g_hwnd);
 
     input::Init();

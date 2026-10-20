@@ -35,6 +35,9 @@ record.raw
 .vscode/
 .idea/
 
-# local tools and notes
+# local tools and notes: the developer's own scripts (dev.bat has machine paths)
+/dev.bat
+/run.ps1
+/start.ps1
 .local
 __pycache__/
