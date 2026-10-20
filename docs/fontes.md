@@ -52,6 +52,24 @@ Conclusão: o jogo tem **uma fonte de verdade** (`mojist_*`, glifos 16×16 compo
 2. **Fonte em alta resolução para o `mojist_*`**: como os glifos estão numa grade fixa de 16×16, dá para gerar um atlas 4× ou 8× maior **a partir de uma fonte livre** (licença aberta), com o mesmo layout, e o runtime trocar a textura ao reconhecê-la. Como as coordenadas são normalizadas, o atlas maior serve sem mudar o jogo. O atlas gerado não deriva da arte da Capcom, então pode ir no repositório.
 3. **Troca de texturas em geral** (como o Dolphin): o runtime exporta cada textura com um código, o usuário põe versões em alta resolução numa pasta. Serve para os títulos e frases prontas; os pacotes de texturas ficam fora do repositório.
 
+## O que outros projetos já fizeram (pesquisa de 19/10/2026)
+
+- **Genma Onimusha (Xbox):** nenhum mod, tradução, pacote de texturas ou fonte encontrado.
+- **Formato `.ldt`/`OIM`:** nenhuma ferramenta ou documentação pública encontrada (GitHub, ZenHAX, XeNTaX). O `tools/oim.py` parece ser o primeiro leitor.
+- **Onimusha: Warlords, remaster de 2019:** existe um pacote de texturas 4K feito com IA (Evgeshajk, ~12 GB) que refaz os fundos pré-renderizados e as texturas dos modelos. É para outro executável e outros arquivos, então não serve aqui, mas mostra que a comunidade aceita esse tipo de upscale.
+- **Emuladores de Xbox (xemu, Cxbx-Reloaded):** sem troca de texturas.
+- **Referências de troca de texturas que valem copiar:**
+  - **RT64**, o renderer do Zelda 64: Recompiled (D3D12/Vulkan): identifica cada textura pelo XXH3 dos bytes da memória de textura e usa um banco `rt64.json` com hash e caminho. Prefere DDS/BC7 (PNG só durante o desenvolvimento) e carrega em segundo plano, com um cache de mipmaps baixos. Uma textura maior corrige as coordenadas pela razão entre os tamanhos. Os pacotes `.rtz` são um zip.
+  - **Dolphin:** textura identificada por hash, exportação e carga de texturas, e pacotes de fontes HD feitos pela comunidade.
+  - **Ship of Harkinian** e **Zelda 64: Recompiled:** recebem pacotes da comunidade, inclusive fontes e HUD em alta resolução, sem mudar o código do jogo.
+
+Para este port, isso indica:
+
+1. **Fonte:** gerar um atlas `mojist_e` 4× a partir de uma fonte livre não encontra concorrente nem conflito, e cabe no repositório.
+2. **Troca de texturas:** seguir o modelo do RT64. Hash (XXH3) dos dados da textura do Xbox, banco JSON, DDS/BC7 e coordenadas escaladas pela razão dos tamanhos. Assim os pacotes da comunidade, inclusive de upscale por IA, ficam possíveis sem nada da Capcom no repositório.
+
+Fontes: [RT64](https://github.com/rt64/rt64), [RT64 texture packs](https://github.com/rt64/rt64/blob/main/TEXTURE-PACKS.md), [pacote 4K do remaster](https://www.dsogaming.com/mods/onimusha-warlords-just-got-a-must-have-4k-texture-pack), [issues do xemu](https://github.com/xemu-project/xemu/issues?q=texture+replacement), [Dolphin #108](https://bugs.dolphin-emu.org/issues/108), [mod de HUD do Zelda 64: Recompiled](https://thunderstore.io/c/zelda-64-recompiled/p/Linkzenic/HD_Style_Controller_HUD/v/0.9.0/), [Ship of Harkinian](https://gamingonlinux.com/2023/03/ship-of-harkinian-a-pc-port-of-ocarina-of-time-has-a-feature-filled-upgrade).
+
 ## Pendente
 
 - Capturar o texto **durante o jogo** (status, diálogo, inventário) para confirmar onde o `mojist_*` é desenhado, com qual filtro e tamanho de tela.
