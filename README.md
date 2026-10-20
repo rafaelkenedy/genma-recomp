@@ -39,8 +39,19 @@ Changes apply at once; **Save** writes them to `game/settings.toml`.
 | Anisotropic filtering | as the game asks, 2x-16x |
 | FPS cap, V-Sync | 30-240 or unlimited (60 by default), V-Sync on or off |
 | Port fixes | Precise depth and Stable point sampling, on by default (see below); off shows the original rendering |
+| HD textures | on by default: uses the textures in `game/textures/` (see below); off shows the original ones |
 
 Logs: the first start writes `work/build.log`, the game writes `game/logs/`.
+
+### HD textures (optional)
+
+A separate download: [GenmaOnimusha-HD-textures.zip](https://drive.google.com/file/d/1oE0Cfq00ih_nQ7XcCPSXXHFNbc89uzmk/view?usp=sharing) (about 9.9 GB). It is a conversion of the "4K Texture Pack AI-Enhanced" (Nexus Mods) for Onimusha: Warlords by **Evgeshajk**, matched to the Xbox textures: about 1,180 of the 1,284 backgrounds, plus the animations (smoke, water).
+
+1. Start the game once, so the `game` folder exists.
+2. Extract the zip into the `game` folder: the files end up in `game/textures/`.
+3. Start the game again. **F1 → HD textures** turns them on and off.
+
+They need a release with HD texture support (the one after v0.2.1). The textures are not part of this repository or its releases; `docs/texture-packs.md` explains how they were made.
 
 ### Requirements
 
@@ -111,6 +122,7 @@ The package is laid out in `out/build/pkg/release/GenmaOnimusha`. `.github/workf
 ## Credits
 
 - [Xbox XBE Recomp](https://github.com/TGP482/XboxXBERecomp) by TGP482, the recompiler and runtime this port is built on.
+- Evgeshajk, for the Onimusha: Warlords 4K texture pack the HD textures are converted from.
 - [LLVM-MinGW](https://github.com/mstorsjo/llvm-mingw), the compiler the release bundles.
 - Third-party licenses are in `sdk/THIRD_PARTY.txt` of a release.
 

@@ -142,6 +142,8 @@ void Fixes(Settings& s) {
     ImGui::Checkbox("Stable point sampling", &s.point_nudge);
     Help("Unfiltered textures pick the same texel every frame when upscaled: no shimmering columns in "
          "animated backgrounds.");
+    ImGui::Checkbox("HD textures", &s.hd_textures);
+    Help("Replacements from the textures folder beside the exe, such as the high resolution font.");
 }
 
 void GameOptions() {

@@ -32,6 +32,7 @@ struct Settings {
     float overscan = 0;              // percent of the frame cut from each edge, as a TV's overscan hid; GameInfo::overscan
     bool precise_depth = true;       // vertex programs' depth without the z / w cancellation (gpu/shaders.cpp)
     bool point_nudge = true;         // point sampled textures take the same texel at edges when upscaled
+    bool hd_textures = true;         // replacements from the textures folder (gpu/replace.h)
     std::string join_ip;                   // co-op: a host past the LAN the system link search also asks
 };
 
