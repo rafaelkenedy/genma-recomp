@@ -54,6 +54,7 @@ float FrameAspect();
 // the settings menu (menu.cpp), F1: display, aspect, render scale, pacing, filtering, port fixes, game options
 bool MenuOpen();
 void ToggleMenu();          // window thread
+void AskQuit();             // window thread, Esc: the quit confirmation, or closes it when it is up
 void DrawMenu(double fps);  // inside the ImGui frame, UiLock held
 
 std::filesystem::path ExeDir();

@@ -129,7 +129,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_KEYDOWN:
             if (wp == VK_F3) DumpThreads();
-            if (wp == VK_F1) ToggleMenu();
+            // not on auto-repeat: a held key acts once
+            if (!(lp & (1 << 30))) {
+                if (wp == VK_F1) ToggleMenu();
+                if (wp == VK_ESCAPE) AskQuit();
+            }
             return 0;
         case WM_ACTIVATE:
             if (LOWORD(wp) == WA_INACTIVE) {

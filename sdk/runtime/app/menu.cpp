@@ -28,6 +28,7 @@ namespace app {
 namespace {
 
 std::atomic<bool> g_open{false};
+std::atomic<bool> g_quit{false};  // the quit confirmation is up
 std::chrono::steady_clock::time_point g_saved{};  // when Save was pressed, for the note beside it
 
 // the monitor's modes, widest first, 640x480 and up
@@ -139,13 +140,49 @@ void GameOptions() {
     }
 }
 
+// "Quit the game?": Enter or Quit closes the window as its close button does, Esc or Cancel goes back
+void DrawQuit() {
+    const char* id = "Quit###quit";
+    if (g_quit.load() && !ImGui::IsPopupOpen(id)) ImGui::OpenPopup(id);
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.5f),
+                            ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    if (!ImGui::BeginPopupModal(id, nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) return;
+    if (!g_quit.load()) {  // Esc again, from the window thread
+        ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+        return;
+    }
+    ImGui::Text("Quit %s?", Narrow(kGame.title).c_str());
+    ImGui::TextDisabled("Progress since the last save is lost.");
+    ImGui::Spacing();
+    float w = ImGui::GetFontSize() * 6;
+    bool quit = ImGui::Button("Quit", ImVec2(w, 0)) || ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
+                ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false);
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", ImVec2(w, 0))) {
+        g_quit = false;
+        ImGui::CloseCurrentPopup();
+    }
+    if (quit) {
+        LOGI("menu: quit");
+        g_quit = false;
+        ImGui::CloseCurrentPopup();
+        PostMessageW(static_cast<HWND>(Window()), WM_CLOSE, 0, 0);
+    }
+    ImGui::EndPopup();
+}
+
 }  // namespace
 
-bool MenuOpen() { return g_open.load(); }
+bool MenuOpen() { return g_open.load() || g_quit.load(); }
 
 void ToggleMenu() { g_open = !g_open.load(); }
 
+void AskQuit() { g_quit = !g_quit.load(); }
+
 void DrawMenu(double fps) {
+    DrawQuit();
     if (!g_open.load()) return;
     Settings& s = Get();
     const ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -177,6 +214,8 @@ void DrawMenu(double fps) {
     }
     ImGui::SameLine();
     if (ImGui::Button("Close")) open = false;
+    ImGui::SameLine();
+    if (ImGui::Button("Quit game")) g_quit = true;
     if (std::chrono::steady_clock::now() - g_saved < std::chrono::seconds(3)) {
         ImGui::SameLine();
         ImGui::TextDisabled("Saved to %s", kGame.settings);
