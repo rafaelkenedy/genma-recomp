@@ -2,7 +2,7 @@
 
 An unofficial native Windows port of the original Xbox version of **Genma Onimusha**, made by statically recompiling the game's executable to C++ with [Xbox XBE Recomp](https://github.com/TGP482/XboxXBERecomp).
 
-**Latest release: [v0.3.0](../../releases/tag/v0.3.0)** · [all releases](../../releases)
+**Latest release: [v0.3.1](../../releases/tag/v0.3.1)** · [all releases](../../releases)
 
 > [!IMPORTANT]
 > This repository and its releases contain **no game code and no game assets**. You need your own legally acquired copy of the game. The release builds the game's code on your PC, from your copy, on the first start.
@@ -72,6 +72,7 @@ They need v0.3.0 or later. The textures are not part of this repository or its r
 
 | Version | What |
 | --- | --- |
+| [v0.3.1](../../releases/tag/v0.3.1) | Fixes distant footsteps and combat sounds, and distorted 3D effects caused by camera orientation; restores the game's distance attenuation |
 | [v0.3.0](../../releases/tag/v0.3.0) | HD texture replacement (DDS, per palette), with the optional HD texture download; an HD font for menus and text; **F1 → HD textures** |
 | [v0.2.1](../../releases/tag/v0.2.1) | fixes the crash when entering room 100 |
 | [v0.2.0](../../releases/tag/v0.2.0) | F1 settings menu; 4:3 with bars by default (it was stretched on wide screens); overscan frame cut with the Original option; Esc asks before quitting |
