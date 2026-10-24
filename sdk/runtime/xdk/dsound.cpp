@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "audio/audio.h"
+#include "audio/distance.h"
 #include "xbe/xbe.h"
 #include "xdk/hle.h"
 #include "xdk/layout.h"
@@ -126,6 +127,12 @@ struct Done {
 std::recursive_mutex g_lock;
 std::map<uint32_t, Voice> g_voices;
 float g_listener[3] = {}, g_front[3] = {0, 0, 1}, g_top[3] = {0, 1, 0};
+float g_rolloff = 1, g_pending_rolloff = 1;
+bool g_rolloff_deferred = false;
+const bool g_audio_diagnostics = [] {
+    const char* value = std::getenv("XBE_AUDIO_DIAGNOSTICS");
+    return value && *value && *value != '0';
+}();
 // Completed packets' callbacks, run as the XDK runs them: in DirectSoundDoWork on the title's thread, so they never
 // overlap the title's own stream code. A stream flushed or released runs its own at once, before it is gone.
 std::deque<Done> g_done;
@@ -244,7 +251,7 @@ void Levels(Voice& v, float g[2][2]) {
     float dist = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
     float att = 1;
     if (dist > v.min_dist && v.curve.empty()) {
-        att = v.min_dist / std::min(dist, v.max_dist);
+        att = audio::DistanceGain(dist, v.min_dist, v.max_dist, g_rolloff);
     } else if (dist > v.min_dist && v.max_dist > v.min_dist) {
         // points spread evenly from min to max distance, 1.0 at min
         float at = (std::min(dist, v.max_dist) - v.min_dist) / (v.max_dist - v.min_dist) * v.curve.size();
@@ -254,8 +261,8 @@ void Levels(Voice& v, float g[2][2]) {
     }
     float right[3] = {g_top[1] * g_front[2] - g_top[2] * g_front[1], g_top[2] * g_front[0] - g_top[0] * g_front[2],
                       g_top[0] * g_front[1] - g_top[1] * g_front[0]};
-    float side = rel ? d[0] : d[0] * right[0] + d[1] * right[1] + d[2] * right[2];
-    float pan = dist > 1e-3f ? side / dist : 0.0f;
+    const float head_right[3] = {1, 0, 0};
+    float pan = audio::DirectionPan(d, rel ? head_right : right);
     for (int c = 0; c < 2; c++) {
         g[c][0] *= att * std::min(1.0f, 1.0f - pan);
         g[c][1] *= att * std::min(1.0f, 1.0f + pan);
@@ -334,7 +341,21 @@ void Render(float* out, uint32_t frames) {
             v.pos += step;
         }
     }
-    for (uint32_t i = 0; i < frames * 2; i++) out[i] = std::clamp(out[i], -1.0f, 1.0f);
+    static float peak = 0;
+    static uint32_t clipped = 0, measured = 0;
+    for (uint32_t i = 0; i < frames * 2; i++) {
+        if (g_audio_diagnostics) {
+            peak = std::max(peak, std::abs(out[i]));
+            clipped += std::abs(out[i]) > 1.0f;
+        }
+        out[i] = std::clamp(out[i], -1.0f, 1.0f);
+    }
+    if (g_audio_diagnostics && (measured += frames) >= audio::kRate) {
+        LOGR("audio diagnostic: peak=%.4f clipped=%u/%u rolloff=%.7f", peak, clipped, measured * 2, g_rolloff);
+        logx::Flush();
+        peak = 0;
+        clipped = measured = 0;
+    }
 }
 
 int64_t NowMs() {
@@ -509,9 +530,22 @@ HLE_STDCALL(IDirectSound_GetSpeakerConfig, 2) {
 HLE_STDCALL(IDirectSound_SetEffectData, 6) { return 0; }
 HLE_STDCALL(IDirectSound_EnableHeadphones, 2) { return 0; }
 HLE_STDCALL(IDirectSound_SetMixBinHeadroom, 3) { return 0; }
-HLE_STDCALL(IDirectSound_CommitDeferredSettings, 1) { return 0; }
+HLE_STDCALL(IDirectSound_CommitDeferredSettings, 1) {
+    std::lock_guard<std::recursive_mutex> lock(g_lock);
+    if (g_rolloff_deferred) g_rolloff = g_pending_rolloff;
+    g_rolloff_deferred = false;
+    return 0;
+}
 HLE_STDCALL(IDirectSound_SetDopplerFactor, 3) { return 0; }
-HLE_STDCALL(IDirectSound_SetRolloffFactor, 3) { return 0; }
+HLE_STDCALL(IDirectSound_SetRolloffFactor, 3) {
+    std::lock_guard<std::recursive_mutex> lock(g_lock);
+    float value = F32(a[1]);
+    if (!std::isfinite(value) || value < 0 || value > 10) return 0x80070057u;
+    g_pending_rolloff = value;
+    g_rolloff_deferred = a[2] != 0;
+    if (!g_rolloff_deferred) g_rolloff = value;
+    return 0;
+}
 HLE_STDCALL(IDirectSound_SetDistanceFactor, 3) { return 0; }
 HLE_STDCALL(IDirectSound_SetVelocity, 5) { return 0; }
 HLE_STDCALL(IDirectSound_SetI3DL2Listener, 3) { return 0; }
@@ -537,6 +571,12 @@ HLE_STDCALL(IDirectSound_SetAllParameters, 3) {
         g_listener[i] = F32(R32(l + 4 + i * 4));
         g_front[i] = F32(R32(l + 28 + i * 4));
         g_top[i] = F32(R32(l + 40 + i * 4));
+    }
+    if (l) {
+        // DS3DLISTENER: distance factor +52, rolloff +56, Doppler +60.
+        g_pending_rolloff = F32(R32(l + 56));
+        g_rolloff_deferred = a[2] != 0;
+        if (!g_rolloff_deferred) g_rolloff = g_pending_rolloff;
     }
     return 0;
 }
@@ -656,6 +696,15 @@ BUFFER(SetBufferData, 3) {
     return 0;
 }
 BUFFER(Play, 4) {
+    if (g_audio_diagnostics) {
+        float gain[2][2];
+        Levels(v, gain);
+        LOGR("audio voice %08X: 3d=%u mode=%u channels=%u vol=%.4f headroom=%.4f bins=%u [%u,%u,%u,%u,%u,%u,%u,%u] gain=%.4f,%.4f,%.4f,%.4f",
+             v.obj, unsigned(v.is3d), v.mode, unsigned(v.channels), v.volume, v.headroom, unsigned(v.nbins),
+             unsigned(v.bin[0]), unsigned(v.bin[1]), unsigned(v.bin[2]), unsigned(v.bin[3]),
+             unsigned(v.bin[4]), unsigned(v.bin[5]), unsigned(v.bin[6]), unsigned(v.bin[7]),
+             gain[0][0], gain[0][1], gain[1][0], gain[1][1]);
+    }
     v.playing = true;
     v.looping = a[3] & 1;
     if (a[3] & 2) v.pos = 0;
