@@ -2,7 +2,7 @@
 
 An unofficial native Windows port of the original Xbox version of **Genma Onimusha**, made by statically recompiling the game's executable to C++ with [Xbox XBE Recomp](https://github.com/TGP482/XboxXBERecomp).
 
-**Latest release: [v0.5.0](../../releases/tag/v0.5.0)** · [all releases](../../releases)
+**Latest release: [v0.5.1](../../releases/tag/v0.5.1)** · [all releases](../../releases)
 
 > [!IMPORTANT]
 > This repository and its releases contain **no game code and no game assets**. You need your own legally acquired copy of the game. The release builds the game's code on your PC, from your copy, on the first start.
@@ -83,6 +83,7 @@ They need v0.3.0 or later. The textures are not part of this repository or its r
 
 | Version | What |
 | --- | --- |
+| [v0.5.1](../../releases/tag/v0.5.1) | Fix analog movement through camera cuts: retain the character's actual heading, preserve it through small stick adjustments, and clear retention on guard or other action states |
 | [v0.5.0](../../releases/tag/v0.5.0) | Modern camera-relative analog controls, direction retained through camera cuts, native guard steps and dodges; D-pad keeps tank controls; configurable in F1 |
 | [v0.4.0](../../releases/tag/v0.4.0) | Launcher auto-update: checks for stable releases, asks before installation, verifies downloads and recovers interrupted updates while keeping saves, settings and textures |
 | [v0.3.1](../../releases/tag/v0.3.1) | Fixes distant footsteps and combat sounds, and distorted 3D effects caused by camera orientation; restores the game's distance attenuation |
