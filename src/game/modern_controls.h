@@ -23,10 +23,10 @@ struct Result {
     uint32_t directions = 0;
 };
 class Movement {
-    bool active_ = false, retained_ = false;
-    int camera_ = 0, reference_ = 0, cutStick_ = 0, lastStick_ = 0;
+    bool active_ = false, retained_ = false, wasFree_ = false;
+    int camera_ = 0, retainedYaw_ = 0, cutStick_ = 0, lastStick_ = 0;
 public:
-    void Reset() { active_ = retained_ = false; }
+    void Reset() { active_ = retained_ = wasFree_ = false; }
     Result Update(const Frame& f) {
         Result r;
         r.yaw = f.yaw;
@@ -37,27 +37,30 @@ public:
             return r;
         }
         const int stick = Angle(float(f.x), float(f.y));
-        if (!active_) {
-            reference_ = f.cameraYaw;
+        const bool guard = (f.held & 0x10) != 0;
+        const bool free = f.state <= 4 && !guard;
+        if (!active_ || !free || !wasFree_) {
             retained_ = false;
         } else {
             if (f.camera != camera_ && !retained_) {
                 retained_ = true;
+                retainedYaw_ = Wrap(f.yaw);
                 cutStick_ = lastStick_;
             }
             // Compare with the cut's anchor, not the preceding sample: slow,
-            // deliberate changes must also release the retained camera.
+            // deliberate changes must also release the retained heading.
             if (retained_ && std::abs(Difference(stick, cutStick_)) > 140)
                 retained_ = false;
-            if (!retained_) reference_ = f.cameraYaw;
         }
         active_ = r.active = true;
+        wasFree_ = free;
         camera_ = f.camera;
         lastStick_ = stick;
-        r.target = Wrap(reference_ - stick);
+        // Preserve the actual facing at a cut, even during a gradual turn.
+        // Small stick corrections cannot bend this retained world heading.
+        r.target = retained_ ? retainedYaw_ : Wrap(f.cameraYaw - stick);
         r.directions = 0;
-        const bool guard = (f.held & 0x10) != 0;
-        if (f.state <= 4 && !guard) {
+        if (free) {
             r.steer = true;
             const float dt = std::clamp(f.seconds, 0.0f, 0.05f);
             const int cap = std::max(1, int(1200.0f * 4096 / 360 * dt));

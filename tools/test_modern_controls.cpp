@@ -21,12 +21,12 @@ int main() {
     assert(r.target == 0); // 180 degree camera cut cannot reverse a held stick
     for (int i = 0; i < 600; ++i) assert(movement.Update(f).target == 0);
     f.camera = 2; f.cameraYaw = 1024;
-    assert(movement.Update(f).target == 0); // repeated cuts keep the same reference
+    assert(movement.Update(f).target == 0); // repeated cuts keep the same heading
     // Gradual input changes are compared with the cut anchor, not each frame.
     for (int angle = 10; angle <= 130; angle += 10) {
         const double rad = angle * 6.283185307179586 / 4096;
         f.x = int(std::sin(rad) * 32767); f.y = int(std::cos(rad) * 32767);
-        assert(std::abs(Difference(movement.Update(f).target, -angle)) <= 1);
+        assert(movement.Update(f).target == 0); // small adjustments keep actual heading
     }
     f.x = 12000; f.y = 30000;
     r = movement.Update(f);
@@ -35,6 +35,28 @@ int main() {
     assert(!movement.Update(f).active);
     f.y = 32767;
     assert(movement.Update(f).target == 1024); // release/re-engage uses new camera
+
+    // A cut while still turning saves actual facing, not the old desired target.
+    movement.Reset();
+    f = {}; f.y = 32767; f.state = 2; f.cameraYaw = 1800;
+    r = movement.Update(f);
+    assert(r.yaw > 0 && r.yaw < r.target);
+    f.yaw = r.yaw; f.camera = 1; f.cameraYaw = 3000;
+    const int retainedYaw = f.yaw;
+    r = movement.Update(f);
+    assert(r.target == retainedYaw && r.yaw == retainedYaw && r.directions == 1);
+    f.camera = 2; f.cameraYaw = 1000;
+    assert(movement.Update(f).target == retainedYaw);
+    // Combat interrupts the latch; returning to movement uses the current view.
+    f.state = 17;
+    assert(!movement.Update(f).steer);
+    f.state = 2;
+    assert(movement.Update(f).target == 1000);
+    f.held = 0x10; f.state = 14;
+    assert(movement.Update(f).dodge);
+    f.held = 0; f.state = 2;
+    assert(movement.Update(f).target == 1000);
+    f.cameraYaw = 1024;
 
     // Hardware directions have priority, including during a retained camera.
     f.held = 8;
