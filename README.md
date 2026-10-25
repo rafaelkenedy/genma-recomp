@@ -25,7 +25,7 @@ The release is made for **Genma Onimusha (USA)**, `default.xbe` SHA-1 `08bfe432e
 
 The game itself is played with a controller: Xbox, PlayStation and Switch controllers work, with hot plugging and rumble.
 
-The left stick uses modern movement relative to the camera. Holding the same stick direction through a camera cut preserves the previous camera reference; release the stick or change its direction to adopt the new view. The D-pad keeps the original tank controls and takes priority. Hold guard and use the stick for native directional steps and dodges. Attacks and target selection retain the game's native behavior.
+The left stick uses modern movement relative to the camera. Holding the same stick direction through a camera cut preserves the character's actual heading; release the stick or change its direction to adopt the new view. The D-pad keeps the original tank controls and takes priority. Hold guard and use the stick for native directional steps and dodges. Attacks and target selection retain the game's native behavior.
 
 ### Settings (F1)
 

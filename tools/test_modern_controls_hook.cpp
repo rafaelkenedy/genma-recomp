@@ -56,6 +56,14 @@ int main() {
     assert((X86_MEM32(kPad) & 0x800F0000) == 0x80000000);
     invoke();
     assert(observed.previous == 1 && observed.pressed == 0);
+    // A camera cut preserves the guest's actual facing, not its prior target.
+    X86_MEM16(kPlayer + 0x8E2) = 1900;
+    X86_MEM16(kCamera) = 1;
+    X86_MEMF32(kView) = -1;
+    invoke();
+    assert(X86_MEM16(kPlayer + 0x8E2) == 1900);
+    assert((observed.held & 15) == 1 && observed.pressed == 0);
+    X86_MEMF32(kView) = 1;
     // Both native side-dodge reads receive the correct raw direction.
     X86_MEM8(kPlayer + 0x24) = 13;
     X86_MEM32(kActions) = 0x10;
@@ -83,6 +91,6 @@ int main() {
         assert((observed.held & 15) == (reason == 4 ? 4u : 0u));
         assert(X86_MEM16(kPlayer + 0x8E2) == 0);
     }
-    assert(calls == 11);
+    assert(calls == 12);
     std::cout << "PASS: production hook ABI, action history, scoped guest restoration, raw dodge sides, locks, menu, disabled option, D-pad and invalid camera\n";
 }
