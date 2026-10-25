@@ -25,6 +25,8 @@ The release is made for **Genma Onimusha (USA)**, `default.xbe` SHA-1 `08bfe432e
 
 The game itself is played with a controller: Xbox, PlayStation and Switch controllers work, with hot plugging and rumble.
 
+The left stick uses modern movement relative to the camera. Holding the same stick direction through a camera cut preserves the previous camera reference; release the stick or change its direction to adopt the new view. The D-pad keeps the original tank controls and takes priority. Hold guard and use the stick for native directional steps and dodges. Attacks and target selection retain the game's native behavior.
+
 ### Settings (F1)
 
 Changes apply at once; **Save** writes them to `game/settings.toml`.
@@ -40,6 +42,7 @@ Changes apply at once; **Save** writes them to `game/settings.toml`.
 | FPS cap, V-Sync | 30-240 or unlimited (60 by default), V-Sync on or off |
 | Port fixes | Precise depth and Stable point sampling, on by default (see below); off shows the original rendering |
 | HD textures | on by default: uses the textures in `game/textures/` (see below); off shows the original ones |
+| Modern analog controls | on by default: camera-relative left-stick movement; off restores the original input behavior |
 
 Logs: the first start writes `work/build.log`, the game writes `game/logs/`.
 

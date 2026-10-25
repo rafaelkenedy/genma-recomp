@@ -78,6 +78,19 @@ jobs:
           $out | Write-Output
           if ($code) { "::error title=Build::$((($out | Where-Object { $_ -match 'error|FAILED' } | Select-Object -First 30) -join '%0A'))"; exit $code }
 
+      - name: Modern controls regression tests
+        shell: pwsh
+        run: |
+          $cxx = "$env:GITHUB_WORKSPACE/llvm-mingw/bin/clang++.exe"
+          & $cxx -std=c++20 -static -Wall -Wextra tools/test_modern_controls.cpp -o build/test_modern_controls.exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & ./build/test_modern_controls.exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & $cxx -std=c++20 -static -Wall -Wextra -Isdk/runtime -Ibuild/GenmaOnimusha_symbols tools/test_modern_controls_hook.cpp -o build/test_modern_controls_hook.exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & ./build/test_modern_controls_hook.exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
       - name: Updater regression tests
         shell: pwsh
         run: |
