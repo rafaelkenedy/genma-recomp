@@ -18,6 +18,7 @@
 # a release's first start (launcher): extracted xbe, generated code, objects, the built game
 /work/
 /game/
+/.update/
 
 # runtime and debugging files
 settings.toml

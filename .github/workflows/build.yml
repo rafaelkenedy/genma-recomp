@@ -78,6 +78,14 @@ jobs:
           $out | Write-Output
           if ($code) { "::error title=Build::$((($out | Where-Object { $_ -match 'error|FAILED' } | Select-Object -First 30) -join '%0A'))"; exit $code }
 
+      - name: Updater regression tests
+        shell: pwsh
+        run: |
+          & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+            -File tools/test_updater.ps1 -Launcher "$env:GITHUB_WORKSPACE/build/release/GenmaOnimusha.exe" `
+            -FixtureVersion '${{ steps.version.outputs.name }}'
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
       - name: Zip
         shell: pwsh
         run: |

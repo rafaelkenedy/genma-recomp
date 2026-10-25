@@ -43,6 +43,14 @@ Changes apply at once; **Save** writes them to `game/settings.toml`.
 
 Logs: the first start writes `work/build.log`, the game writes `game/logs/`.
 
+### Updates
+
+The release launcher checks GitHub for a newer stable version when it opens. If one is available, it asks before downloading and installing it. You can choose **No** and play your installed version; an offline or failed check also lets the game start.
+
+After an update the launcher restarts and rebuilds the game once with the new version. Saves, settings, your game files and texture packs are kept. Downloading can be cancelled; an interrupted installation is restored on the next start. Update errors are written to `.update/error.txt`.
+
+Start the launcher with `--no-update` to skip the network check. Development builds do not check for updates. Older releases that do not include the updater need one manual download before they can update themselves.
+
 ### HD textures (optional)
 
 A separate download: [GenmaOnimusha-HD-textures.zip](https://archive.org/details/genma-onimusha-hd-textures) (about 9.9 GB). It is a conversion of the "4K Texture Pack AI-Enhanced" (Nexus Mods) for Onimusha: Warlords by **Evgeshajk**, matched to the Xbox textures: about 1,180 of the 1,284 backgrounds, plus the animations.

@@ -8,6 +8,8 @@ file(MAKE_DIRECTORY ${PKG}/assets ${PKG}/sdk/bin ${PKG}/sdk/lib ${PKG}/sdk/inclu
 # the launcher and the recompiler
 file(COPY ${LAUNCHER} DESTINATION ${PKG})
 file(COPY ${RECOMP} DESTINATION ${PKG}/sdk/bin)
+file(COPY ${SDK}/launcher/update.ps1 DESTINATION ${PKG}/sdk)
+file(WRITE ${PKG}/sdk/update-version.txt "${VERSION}\n")
 
 # what the generated code is compiled and linked against
 file(COPY ${RUNTIME} ${SDL} DESTINATION ${PKG}/sdk/lib)
