@@ -20,6 +20,7 @@ struct Info {
     const wchar_t* config;   // sdk/config/<config>
     const wchar_t* runtime;  // sdk/lib/<runtime>
     const char* version;     // release name; a game built by another release is built again
+    const char* update_repository;  // owner/repository on GitHub; empty disables update checks
 };
 extern const Info kInfo;
 
@@ -34,6 +35,8 @@ struct Paths {
     fs::path stamp;      // root/game/build.txt: the release and xbe the game was built from
 };
 Paths MakePaths();
+// true when an update takes over or another launcher owns the installation.
+bool CheckForUpdates(const Paths& p);
 
 // a progress window on the calling thread's message loop; the build reports from a worker thread
 class Progress {
@@ -57,5 +60,6 @@ bool Build(const Paths& p, Progress& progress, std::wstring& error);
 // text helpers
 std::wstring Widen(const std::string& s);
 std::string Narrow(const std::wstring& s);
+std::wstring QuoteArgument(const std::wstring& arg);
 
 }  // namespace launcher

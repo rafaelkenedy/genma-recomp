@@ -38,6 +38,7 @@ endif()
 #                and package_GenmaOnimusha (release/GenmaOnimusha/), which builds the game on the player's PC
 option(XBE_RELEASE "build the release without game code (needs cmake/llvm-mingw.cmake)" OFF)
 set(XBE_RELEASE_TITLE "Genma Onimusha")
+set(XBE_UPDATE_REPOSITORY "rafaelkenedy/genma-recomp")
 if(XBE_RELEASE)
     add_xbe_release(GenmaOnimusha default.xbe game.toml game)
 elseif(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/assets/default.xbe)

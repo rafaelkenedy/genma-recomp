@@ -14,5 +14,7 @@ Changes since that commit, in short:
   switches (`shadow_bias`, `skip_draws`, `precise_depth`, `point_nudge`)
 - Release without game code: LLVM-MinGW build, `add_xbe_release`, `cmake/XbePackage.cmake`, the `launcher/`, and
   `assets/game_path.txt` in `runtime/app/game_files.cpp`
+- Release updates: startup check with confirmation, GitHub asset SHA-256 verification, staged installation,
+  rollback/recovery and preserved player data (`launcher/update.cpp`, `launcher/update.ps1`)
 
 The port's notes in `../docs/` describe each change.

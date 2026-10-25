@@ -54,6 +54,20 @@ Paths MakePaths() {
     return p;
 }
 
+// Windows command-line quoting, including embedded quotes and trailing backslashes.
+std::wstring QuoteArgument(const std::wstring& arg) {
+    std::wstring out = L"\"";
+    unsigned slashes = 0;
+    for (wchar_t c : arg) {
+        if (c == L'\\') { slashes++; continue; }
+        out.append(c == L'\"' ? slashes * 2 + 1 : slashes, L'\\');
+        slashes = 0;
+        out += c;
+    }
+    out.append(slashes * 2, L'\\');
+    return out + L"\"";
+}
+
 namespace {
 
 std::string Sha1(const std::vector<uint8_t>& data) {
@@ -151,11 +165,14 @@ fs::path AskForGame() {
 }
 
 bool StartGame(const Paths& p) {
-    std::wstring cmd = L"\"" + p.game_exe.wstring() + L"\"";
+    std::wstring cmd = QuoteArgument(p.game_exe.wstring());
     // the launcher's own arguments go on to the game
     int argc = 0;
     if (LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc)) {
-        for (int i = 1; i < argc; i++) cmd += L" \"" + std::wstring(argv[i]) + L"\"";
+        for (int i = 1; i < argc; i++) {
+            std::wstring arg = argv[i];
+            if (arg != L"--no-update" && arg != L"--skip-update-once") cmd += L" " + QuoteArgument(arg);
+        }
         LocalFree(argv);
     }
     STARTUPINFOW si{sizeof(si)};
@@ -180,6 +197,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     Paths p = MakePaths();
     std::error_code ec;
+
+    if (CheckForUpdates(p)) return 0;
 
     // 1. already built by this release
     if (fs::exists(p.game_exe, ec) && ReadText(p.stamp) == StampText()) return StartGame(p) ? 0 : 1;

@@ -166,10 +166,12 @@ const launcher::Info launcher::kInfo = {
     .config = L\"${config}\",
     .runtime = L\"lib${target}_runtime.a\",
     .version = \"${XBE_RELEASE_VERSION}\",
+    .update_repository = \"${XBE_UPDATE_REPOSITORY}\",
 };
 ")
     add_executable(${target}_launcher WIN32 ${XBE_SDK_DIR}/launcher/main.cpp ${XBE_SDK_DIR}/launcher/build.cpp
-        ${XBE_SDK_DIR}/launcher/window.cpp ${XBE_SDK_DIR}/runtime/kernel/disc.cpp ${XBE_SDK_DIR}/runtime/kernel/crypto.cpp
+        ${XBE_SDK_DIR}/launcher/window.cpp ${XBE_SDK_DIR}/launcher/update.cpp
+        ${XBE_SDK_DIR}/runtime/kernel/disc.cpp ${XBE_SDK_DIR}/runtime/kernel/crypto.cpp
         ${LAUNCHER_INFO})
     target_include_directories(${target}_launcher PRIVATE ${XBE_SDK_DIR}/launcher ${XBE_SDK_DIR}/runtime)
     target_compile_definitions(${target}_launcher PRIVATE UNICODE _UNICODE _CRT_SECURE_NO_WARNINGS _WIN32_WINNT=0x0A00 WINVER=0x0A00)
@@ -188,6 +190,7 @@ const launcher::Info launcher::kInfo = {
     add_custom_target(package_${target}
         COMMAND ${CMAKE_COMMAND}
             -DPKG=${PKG} -DTARGET=${target} -DSDK=${XBE_SDK_DIR} -DGAME=${CMAKE_CURRENT_SOURCE_DIR} -DCONFIG=${config}
+            -DVERSION=${XBE_RELEASE_VERSION}
             -DLAUNCHER=$<TARGET_FILE:${target}_launcher> -DRECOMP=$<TARGET_FILE:xbe_recomp>
             -DRUNTIME=$<TARGET_FILE:${target}_runtime> -DSDL=$<TARGET_LINKER_FILE:SDL3::SDL3-static>
             -DSYMBOLS=${SYM}/image_symbols.h -DTOOLCHAIN=${TOOLCHAIN_DIR}
