@@ -1,0 +1,117 @@
+name: build-appimage
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libglu1-mesa-dev freeglut3-dev libx11-dev libxrandr-dev libxi-dev
+
+      - name: Version
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "name=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "name=dev-${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Configure CMake
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DXBE_RELEASE=ON \
+            -DXBE_RELEASE_VERSION="${{ steps.version.outputs.name }}" \
+            -DCMAKE_C_FLAGS="-march=x86-64-v2" \
+            -DCMAKE_CXX_FLAGS="-march=x86-64-v2"
+
+      - name: Build Project
+        run: |
+          cmake --build build --target GenmaOnimusha
+
+      # Run your project's regression tests natively on Linux
+      - name: Run Regression Tests
+        run: |
+          g++ -std=c++20 -Wall -Wextra tools/test_modern_controls.cpp -o build/test_modern_controls
+          ./build/test_modern_controls
+          g++ -std=c++20 -Wall -Wextra -Isdk/runtime -Ibuild/GenmaOnimusha_symbols tools/test_modern_controls_hook.cpp -o build/test_modern_controls_hook
+          ./build/test_modern_controls_hook
+
+      # Step-by-step setup of the AppImage AppDir structure
+      - name: Prepare AppDir Structure
+        run: |
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+          
+          # 1. Copy your compiled main executable (adjust the source path if cmake outputs elsewhere)
+          cp build/release/GenmaOnimusha AppDir/usr/bin/
+          
+          # 2. Setup Desktop Entry (Required by appimagetool)
+          cat << 'EOF' > AppDir/usr/share/applications/GenmaOnimusha.desktop
+          [Desktop Entry]
+          Type=Application
+          Name=GenmaOnimusha
+          Comment=Genma Onimusha Recompiler and Launcher
+          Exec=GenmaOnimusha
+          Icon=GenmaOnimusha
+          Categories=Game;
+          EOF
+          cp AppDir/usr/share/applications/GenmaOnimusha.desktop AppDir/
+          
+          # 3. Setup App Icon (Replace placeholder with your actual project icon if available)
+          if [ -f "assets/icon.png" ]; then
+            cp assets/icon.png AppDir/usr/share/icons/hicolor/256x256/apps/GenmaOnimusha.png
+            cp assets/icon.png AppDir/GenmaOnimusha.png
+          else
+            # Create a fallback blank icon if your repository lacks one to prevent appimagetool failure
+            convert -size 256x256 xc:black AppDir/GenmaOnimusha.png
+            cp AppDir/GenmaOnimusha.png AppDir/usr/share/icons/hicolor/256x256/apps/GenmaOnimusha.png
+          fi
+          
+          # 4. Create the standard execution script for entry
+          cat << 'EOF' > AppDir/AppRun
+          #!/bin/bash
+          SELF=$(readlink -f "$0")
+          HERE="${SELF%/*}"
+          export PATH="$HERE/usr/bin:$PATH"
+          export LD_LIBRARY_PATH="$HERE/usr/lib:$LD_LIBRARY_PATH"
+          exec "$HERE/usr/bin/GenmaOnimusha" "$@"
+          EOF
+          chmod +x AppDir/AppRun
+
+      - name: Download and run appimagetool
+        run: |
+          wget -q https://github.com
+          chmod +x appimagetool-x86_64.AppImage
+          
+          # Disable appimagetool sandboxing since it runs inside a Docker/VM Actions container
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          
+          ./appimagetool-x86_64.AppImage AppDir GenmaOnimusha-${{ steps.version.outputs.name }}-x86_64.AppImage
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GenmaOnimusha-${{ steps.version.outputs.name }}-AppImage
+          path: GenmaOnimusha-${{ steps.version.outputs.name }}-x86_64.AppImage
+
+      - name: Release AppImage
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" "GenmaOnimusha-${{ steps.version.outputs.name }}-x86_64.AppImage" --title "${{ github.ref_name }}" --generate-notes
