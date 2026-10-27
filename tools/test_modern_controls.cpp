@@ -66,11 +66,26 @@ int main() {
     assert(!movement.Update(f).active);
     f.allowed = true;
     assert(movement.Update(f).target == 1024);
-    // Direction bits are not reintroduced during attack, magic or scripted states.
-    for (int state : {8, 9, 10, 11, 12, 15, 16, 17, 18, 19, 255}) {
+    // Protected/scripted states do not receive synthetic movement.
+    for (int state : {8, 9, 10, 11, 15, 16, 18, 19, 255}) {
         f.state = uint8_t(state);
         r = movement.Update(f);
         assert(r.active && !r.steer && !r.dodge && r.directions == 0);
+    }
+    // Issues #19/#24: let the native handlers see movement intent while
+    // absorbing souls or attacking. They own the cancel window and cleanup.
+    for (int state : {12, 17}) {
+        for (int angle : {0, 1024, 2048, 3072}) {
+            f.state = uint8_t(state); f.cameraYaw = angle;
+            r = movement.Update(f);
+            assert(r.active && !r.steer && !r.dodge && r.directions == 1);
+            assert(r.yaw == f.yaw);
+            f.held = 0x10;
+            assert(movement.Update(f).directions == 0); // guard takes priority
+            f.held = 0; f.allowed = false;
+            assert(!movement.Update(f).active); // magic/cutscene input locks
+            f.allowed = true;
+        }
     }
     f.state = 0; f.held = 0x10;
     assert(movement.Update(f).directions == 0); // guard beats forward
@@ -108,5 +123,5 @@ int main() {
     actions = Substitute(original, 8, 8);
     assert(actions.previous == 0x56788 && actions.pressed == original.pressed);
     assert(actions.repeat == original.repeat);
-    std::cout << "PASS: dead zone, camera cuts, cumulative stick changes, release, D-pad, locks, action states, guard/dodge, timing and action edges\n";
+    std::cout << "PASS: dead zone, camera cuts, release, D-pad, locks, soul/attack cancel intent, guard/dodge, timing and action edges\n";
 }
