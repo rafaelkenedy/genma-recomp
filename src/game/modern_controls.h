@@ -75,10 +75,15 @@ public:
             const int relative = Difference(Wrap(f.cameraYaw - stick), f.yaw);
             const int distance = std::abs(relative);
             r.directions = distance <= 512 ? 1 : distance >= 1536 ? 4 : relative > 0 ? 8 : 2;
+        } else if (!guard && (f.state == 12 || f.state == 17)) {
+            // Soul absorption and attacks consume held forward to request a
+            // native movement cancel. Attack animation flags still decide when
+            // that request is legal; do not steer or change the state here.
+            r.directions = 1;
         }
         // Guard entry must not receive forward (which takes priority over guard).
-        // Other action states receive no synthetic direction: magic, attacks,
-        // recovery, interactions and scripted motion remain native.
+        // Other action states receive no synthetic direction. Input locks and
+        // native animation transitions still own magic and scripted motion.
         return r;
     }
 };

@@ -75,6 +75,31 @@ int main() {
     X86_MEM16(kPad + 0x20) = uint16_t(-32767);
     invoke();
     assert((observed.held & 15) == 8 && (observedPad & 0xF0000) == 0x40000);
+    // Native attack/absorb handlers must receive held movement intent, without
+    // us rotating the character or modifying its state/animation to force a cancel.
+    for (int state : {12, 17}) {
+        X86_MEM8(kPlayer + 0x24) = uint8_t(state);
+        X86_MEM16(kPlayer + 0x8E2) = 1900;
+        X86_MEM32(kActions) = 0x200; // retain the absorb action, when held
+        X86_MEM32(kActions + 4) = 0x200;
+        X86_MEM32(kActions + 8) = 0;
+        X86_MEM32(kActions + 12) = 0;
+        synthesized = false;
+        invoke();
+        assert(observed.held == 0x201 && observed.pressed == 1);
+        assert(X86_MEM16(kPlayer + 0x8E2) == 1900);
+        assert(X86_MEM8(kPlayer + 0x24) == state);
+        assert(X86_MEM32(kActions) == 0x10000200);
+        invoke();
+        assert(observed.previous == 0x201 && observed.pressed == 0);
+        for (uint32_t flags : {0x1000u, 0x800000u}) {
+            X86_MEM32(kControlFlags) = flags == 0x1000 ? flags : 0;
+            X86_MEM32(kGameFlags) = flags == 0x800000 ? flags : 0;
+            invoke();
+            assert((observed.held & 15) == 0);
+        }
+        X86_MEM32(kControlFlags) = X86_MEM32(kGameFlags) = 0;
+    }
     for (int reason = 0; reason < 7; ++reason) {
         X86_MEM32(kActions) = 0x100;
         X86_MEM32(kControlFlags) = reason == 0 ? 0x1000 : 0;
@@ -91,6 +116,6 @@ int main() {
         assert((observed.held & 15) == (reason == 4 ? 4u : 0u));
         assert(X86_MEM16(kPlayer + 0x8E2) == 0);
     }
-    assert(calls == 12);
-    std::cout << "PASS: production hook ABI, action history, scoped guest restoration, raw dodge sides, locks, menu, disabled option, D-pad and invalid camera\n";
+    assert(calls == 20);
+    std::cout << "PASS: production hook ABI, history, restoration, soul/attack cancel intent and locks, raw dodge sides, menu, option, D-pad and camera\n";
 }
