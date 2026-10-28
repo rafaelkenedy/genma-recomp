@@ -18,6 +18,20 @@ env:
   LLVM_MINGW_SHA256: e3ad77d117a4bea19a7a3b333341824d79a5a371004a10e25b8504e7b3047666
 
 jobs:
+  linux-core:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Configure native tools and portable core
+        run: cmake --preset linux-core
+      - name: Build without game assets
+        run: cmake --build --preset linux-core --parallel 4
+      - name: Core and movement regressions
+        run: ctest --preset linux-core
+
   release:
     runs-on: windows-2022
     steps:
