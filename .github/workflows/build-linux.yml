@@ -28,11 +28,15 @@ jobs:
       - name: Window and Vulkan dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev libxfixes-dev libxss-dev libxtst-dev libvulkan1 mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
+          sudo apt-get install --no-install-recommends -y libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev libxfixes-dev libxss-dev libxtst-dev libvulkan1 mesa-vulkan-drivers vulkan-validationlayers xvfb xauth openbox x11-utils
       - run: cmake --preset linux-window
       - run: cmake --build --preset linux-window --target genma_window_smoke test_wsl_controller_bridge --parallel 4
       - run: ctest --preset linux-window -R '^(test_sdl_window|test_wsl_controller_bridge)$'
-      - run: timeout 45s xvfb-run -a env SDL_VIDEODRIVER=x11 ./out/build/linux-window/genma_window_smoke --backend vulkan --self-test
+      - name: Vulkan window with fullscreen support
+        run: |
+          timeout 45s xvfb-run -a -s '-screen 0 1280x800x24' \
+            env SDL_VIDEODRIVER=x11 bash tools/test_x11_window.sh \
+            ./out/build/linux-window/genma_window_smoke --backend vulkan --self-test
   linux-package:
     needs: [linux-core, linux-window]
     runs-on: ubuntu-22.04

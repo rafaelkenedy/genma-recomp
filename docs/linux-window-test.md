@@ -110,3 +110,15 @@ Validado em 28/10/2026 no Ubuntu 22.04.5/WSLg, com Clang 17 e SDL 3.4.16:
 A ferramenta de inspeção do desktop Windows não iniciou nesta sessão (`failed to write kernel assets`, caminho não encontrado, inclusive após reset). Portanto, não foi feita validação adicional de screenshot do compositor ou entrega de teclas físicas via automação do desktop. A captura inspecionada é a imagem produzida pelo renderer SDL.
 
 Não há validação de Steam Deck, controle físico ou Wayland nesta etapa. O renderer do jogo continua Windows/D3D12. A janela interativa usa os mesmos handlers exercitados pelo self-test e pode ser aberta com os comandos acima.
+
+## CI com Xvfb
+
+O teste X11/Vulkan exige um gerenciador de janelas para confirmar as transições de fullscreen por EWMH. O Xvfb sozinho fornece o servidor X, mas não atende esses pedidos. O job `linux-window` instala Openbox e `x11-utils`; `tools/test_x11_window.sh` inicia o gerenciador, espera o anúncio de `_NET_WM_STATE_FULLSCREEN`, executa o teste e encerra o gerenciador ao sair. Usar esse helper apenas em um display isolado:
+
+```sh
+timeout 45s xvfb-run -a -s '-screen 0 1280x800x24' \
+  env SDL_VIDEODRIVER=x11 bash tools/test_x11_window.sh \
+  ./out/build/linux-window/genma_window_smoke --backend vulkan --self-test
+```
+
+Reprodução local em 28/10/2026, Ubuntu 22.04/Xvfb e llvmpipe (LLVM 15.0.7): sem Openbox, o comando original falhou com `FAIL: fullscreen enabled`, igual ao runner. Com o helper, passaram entrada/saída de fullscreen, resize, teclado, controle virtual e os dois readbacks Vulkan: 130 quadros, zero pixels diferentes entre os 691.200 pixels finais. Um comando de teste que retorna 7 também preservou esse código na saída do helper. A verificação de fullscreen permanece habilitada.
