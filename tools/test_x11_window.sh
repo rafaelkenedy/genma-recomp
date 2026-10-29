@@ -10,6 +10,10 @@ wm_log=$(mktemp)
 openbox --sm-disable >"$wm_log" 2>&1 &
 wm_pid=$!
 cleanup() {
+    status=$?
+    if [[ $status -ne 0 ]]; then
+        cat "$wm_log" >&2
+    fi
     kill "$wm_pid" 2>/dev/null || true
     wait "$wm_pid" 2>/dev/null || true
     rm -f -- "$wm_log"

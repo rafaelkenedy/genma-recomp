@@ -113,7 +113,7 @@ Não há validação de Steam Deck, controle físico ou Wayland nesta etapa. O r
 
 ## CI com Xvfb
 
-O teste X11/Vulkan exige um gerenciador de janelas para confirmar as transições de fullscreen por EWMH. O Xvfb sozinho fornece o servidor X, mas não atende esses pedidos. O job `linux-window` instala Openbox e `x11-utils`; `tools/test_x11_window.sh` inicia o gerenciador, espera o anúncio de `_NET_WM_STATE_FULLSCREEN`, executa o teste e encerra o gerenciador ao sair. Usar esse helper apenas em um display isolado:
+O teste X11/Vulkan exige um gerenciador de janelas para confirmar as transições de fullscreen por EWMH. O Xvfb sozinho fornece o servidor X, mas não atende esses pedidos. O job `linux-window` instala Openbox e `x11-utils`; `tools/test_x11_window.sh` inicia o gerenciador, espera o anúncio de `_NET_WM_STATE_FULLSCREEN`, executa o teste e encerra o gerenciador ao sair. No runner, `VK_DRIVER_FILES` e `VK_ICD_FILENAMES` selecionam explicitamente `/usr/share/vulkan/icd.d/lvp_icd.x86_64.json`, mantendo a prova em Vulkan por software independente de outros ICDs presentes na imagem. Os logs identificam a inicialização SDL, a criação da janela, do dispositivo GPU e sua associação à janela. Usar esse helper apenas em um display isolado:
 
 ```sh
 timeout 45s xvfb-run -a -s '-screen 0 1280x800x24' \

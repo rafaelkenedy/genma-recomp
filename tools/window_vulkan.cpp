@@ -34,9 +34,11 @@ struct Command {
 }
 
 void VulkanPresenter::Init(SDL_Window* window) {
+    SDL_Log("creating Vulkan GPU device");
     device_ = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, true, "vulkan");
     Require(device_ != nullptr, "create explicit Vulkan device (no software-renderer fallback)");
     Require(std::strcmp(SDL_GetGPUDeviceDriver(device_), "vulkan") == 0, "verify Vulkan backend");
+    SDL_Log("claiming SDL window for Vulkan GPU device");
     Require(SDL_ClaimWindowForGPUDevice(device_, window), "claim Vulkan window");
     window_ = window;
     SDL_Log("Vulkan device: backend=%s name=%s", SDL_GetGPUDeviceDriver(device_),

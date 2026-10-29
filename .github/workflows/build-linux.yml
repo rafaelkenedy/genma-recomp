@@ -33,6 +33,9 @@ jobs:
       - run: cmake --build --preset linux-window --target genma_window_smoke test_wsl_controller_bridge --parallel 4
       - run: ctest --preset linux-window -R '^(test_sdl_window|test_wsl_controller_bridge)$'
       - name: Vulkan window with fullscreen support
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
         run: |
           timeout 45s xvfb-run -a -s '-screen 0 1280x800x24' \
             env SDL_VIDEODRIVER=x11 bash tools/test_x11_window.sh \

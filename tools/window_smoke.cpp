@@ -123,8 +123,10 @@ int main(int argc, char** argv) {
     try {
         SDL_SetMainReady();
         SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+        SDL_Log("initializing SDL video and gamepads");
         Check(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD), "SDL_Init");
         QuitSDL quit;
+        SDL_Log("creating SDL test window");
         std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> window(
             SDL_CreateWindow("Genma Linux window test | F11 fullscreen | Esc quit", 1280, 800,
                              SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY), SDL_DestroyWindow);
