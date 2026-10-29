@@ -13,6 +13,7 @@
 #include <windows.h>
 #else
 #include <sys/mman.h>
+#include <unistd.h>
 #endif
 
 namespace mem {
@@ -56,12 +57,16 @@ bool Init() {
     }
 #else
     void* p = mmap(reinterpret_cast<void*>(0x100000000ull), size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-    g_base = p == MAP_FAILED ? nullptr : static_cast<uint8_t*>(p);
-    int fd = g_base ? memfd_create("ram", 0) : -1;
-    if (fd < 0 || ftruncate(fd, kPhysicalSize) ||
-        mmap(g_base + kContiguousBase, kPhysicalSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, 0) == MAP_FAILED ||
-        mmap(g_base + kWriteCombineBase, kPhysicalSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, 0) == MAP_FAILED)
-        g_base = nullptr;
+    if (p != MAP_FAILED) {
+        auto* candidate = static_cast<uint8_t*>(p);
+        const int fd = memfd_create("ram", MFD_CLOEXEC);
+        const bool ok = fd >= 0 && ftruncate(fd, kPhysicalSize) == 0 &&
+            mmap(candidate + kContiguousBase, kPhysicalSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, 0) != MAP_FAILED &&
+            mmap(candidate + kWriteCombineBase, kPhysicalSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, 0) != MAP_FAILED;
+        if (fd >= 0) close(fd);
+        if (ok) g_base = candidate;
+        else munmap(candidate, size);
+    }
 #endif
     if (!g_base) {
         LOGE("memory: could not reserve the 4 GB guest space");

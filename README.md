@@ -96,12 +96,13 @@ They need v0.3.0 or later. The textures are not part of this repository or its r
 
 ## Building from source
 
-There are two builds:
+Build configurations:
 
 | Build | Needs the game | What it makes |
 | --- | --- | --- |
 | Development (`build.bat`) | yes, in `assets/` | the full game exe, for working on the port |
 | Release (`-DXBE_RELEASE=ON`) | no | the launcher package the CI publishes |
+| Linux core (`--preset linux-core`) | no | native recompiler tools and portable-core regression tests; the Linux game runtime is still in development |
 
 Clone the repository; the SDK is included in `sdk/`.
 
@@ -123,6 +124,23 @@ cmake --build out/build/pkg --target package_GenmaOnimusha
 ```
 
 The package is laid out in `out/build/pkg/release/GenmaOnimusha`. `.github/workflows/build.yml` does the same on every push, and publishes a release for every `v*` tag.
+
+### Linux tools and core tests
+
+Requires Linux x86-64, CMake 3.25+, Clang with a C++20 standard library, Make and Git:
+
+```sh
+cmake --preset linux-core
+cmake --build --preset linux-core --parallel 4
+ctest --preset linux-core
+```
+
+This builds native `xbe_recomp` and `xbe_symbols` tools and tests memory aliases,
+disc access, hook/continuation ABI, modern controls and audio attenuation without
+game assets. It does not yet build a playable Linux game or AppImage.
+`XBE_BUILD_RUNTIME` defaults to on for Windows and off for Linux;
+`XBE_BUILD_TESTS=ON` enables these tests on either platform. The Linux core build
+does not download SDL or ImGui. See [the Linux/Steam Deck plan](docs/linux-port-plan.md).
 
 ## Layout
 

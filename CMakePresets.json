@@ -20,11 +20,30 @@
         {"name": "release", "displayName": "Release", "inherits": "base",
          "cacheVariables": {"CMAKE_BUILD_TYPE": "Release"}},
         {"name": "relwithdebinfo", "displayName": "RelWithDebInfo", "inherits": "base",
-         "cacheVariables": {"CMAKE_BUILD_TYPE": "RelWithDebInfo"}}
+         "cacheVariables": {"CMAKE_BUILD_TYPE": "RelWithDebInfo"}},
+        {
+            "name": "linux-core",
+            "displayName": "Linux tools and portable core (no game runtime)",
+            "generator": "Unix Makefiles",
+            "binaryDir": "${sourceDir}/out/build/linux-core",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "XBE_BUILD_RUNTIME": "OFF",
+                "XBE_BUILD_TESTS": "ON"
+            },
+            "condition": {"type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux"}
+        }
     ],
     "buildPresets": [
         {"name": "debug", "configurePreset": "debug"},
         {"name": "release", "configurePreset": "release"},
-        {"name": "relwithdebinfo", "configurePreset": "relwithdebinfo"}
+        {"name": "relwithdebinfo", "configurePreset": "relwithdebinfo"},
+        {"name": "linux-core", "configurePreset": "linux-core"}
+    ],
+    "testPresets": [
+        {"name": "linux-core", "configurePreset": "linux-core",
+         "output": {"outputOnFailure": true}, "execution": {"noTestsAction": "error"}}
     ]
 }
