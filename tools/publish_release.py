@@ -45,21 +45,35 @@ def gh(*args, missing_ok=False):
     return json.loads(result.stdout) if result.stdout.strip().startswith('{') else result.stdout
 
 
-def publish(directory, tag, commit, repository):
-    if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repository):
-        raise ValueError('Invalid repository')
+def prepare_files(directory, tag, commit):
     metadata = verify(directory, tag, commit)
     combined = dict(schema=1, version=tag, commit=commit, platforms=metadata)
     (directory / 'release-manifest.json').write_text(json.dumps(combined, indent=2, sort_keys=True) + '\n')
     files = [directory / value['file'] for value in metadata.values()] + [directory / 'release-manifest.json']
     (directory / 'SHA256SUMS').write_text(''.join(sha(path) + '  ' + path.name + '\n' for path in files))
     files.append(directory / 'SHA256SUMS')
-    endpoint = f'repos/{repository}/releases/tags/{tag}'
-    release = gh('api', endpoint, missing_ok=True)
+    return files
+
+
+def find_release(repository, tag):
+    # The tag endpoint omits drafts. List releases (including authenticated
+    # drafts) and let gh handle pagination before selecting the exact tag.
+    return gh('api', f'repos/{repository}/releases?per_page=100', '--paginate',
+              '--jq', '.[] | select(.tag_name == ' + json.dumps(tag) + ')') or None
+
+
+def publish(directory, tag, commit, repository):
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repository):
+        raise ValueError('Invalid repository')
+    files = prepare_files(directory, tag, commit)
+    release = find_release(repository, tag)
     if release is None:
         gh('release', 'create', tag, '--repo', repository, '--target', commit, '--title', tag,
            '--generate-notes', '--notes', 'Windows x86-64 and experimental native Linux x86-64. Linux updates are manual; see the included README.', '--draft')
-        release = gh('api', endpoint)
+        release = find_release(repository, tag)
+    if release is None:
+        raise ValueError('Created release was not found in the authenticated release list')
+    endpoint = f'repos/{repository}/releases/{release["id"]}'
     existing = {asset['name']: asset for asset in release.get('assets', [])}
     pending = []
     for path in files:
