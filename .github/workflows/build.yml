@@ -1,134 +1,73 @@
-# Builds the release without game code: the launcher, the runtime library, the recompiler and the LLVM-MinGW
-# toolchain. The player's PC builds the game from their own disc image on the first start (docs/distribuicao.md).
-# Every push and pull request uploads the zip as an artifact; a tag v* publishes it as a GitHub release.
 name: build
-
 on:
   push:
     branches: [main]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
-
+    inputs:
+      platform:
+        type: choice
+        options: [both, windows, linux]
+        default: both
 permissions:
-  contents: write  # the release on tags
-
-env:
-  LLVM_MINGW_VERSION: '20260922'
-  LLVM_MINGW_SHA256: e3ad77d117a4bea19a7a3b333341824d79a5a371004a10e25b8504e7b3047666
-
+  contents: read
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
-  linux-core:
+  metadata:
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      commit: ${{ steps.meta.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: meta
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os,re,subprocess
+          commit=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          version=os.environ['REF_NAME'] if os.environ['REF_TYPE']=='tag' else 'dev-'+commit[:8]
+          if not re.fullmatch(r'(v[0-9]+\.[0-9]+\.[0-9]+(?:[.-][A-Za-z0-9.-]+)?|dev-[a-f0-9]{8})',version):
+              raise SystemExit('Invalid release version')
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:
+              f.write('version='+version+'\ncommit='+commit+'\n')
+          PY
+  windows:
+    needs: metadata
+    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'linux'
+    uses: ./.github/workflows/build-windows.yml
+    with:
+      version: ${{ needs.metadata.outputs.version }}
+      commit: ${{ needs.metadata.outputs.commit }}
+  linux:
+    needs: metadata
+    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'windows'
+    uses: ./.github/workflows/build-linux.yml
+    with:
+      version: ${{ needs.metadata.outputs.version }}
+      commit: ${{ needs.metadata.outputs.commit }}
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [metadata, windows, linux]
+    runs-on: ubuntu-22.04
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v5
-      - name: Configure native tools and portable core
-        run: cmake --preset linux-core
-      - name: Build without game assets
-        run: cmake --build --preset linux-core --parallel 4
-      - name: Core and movement regressions
-        run: ctest --preset linux-core
-
-  release:
-    runs-on: windows-2022
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Toolchain cache
-        id: cache
-        uses: actions/cache@v4
+      - uses: actions/download-artifact@v4
         with:
-          path: llvm-mingw
-          key: llvm-mingw-${{ env.LLVM_MINGW_VERSION }}-ucrt-x86_64
-
-      - name: Download LLVM-MinGW
-        if: steps.cache.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          $name = "llvm-mingw-$env:LLVM_MINGW_VERSION-ucrt-x86_64"
-          Invoke-WebRequest "https://github.com/mstorsjo/llvm-mingw/releases/download/$env:LLVM_MINGW_VERSION/$name.zip" -OutFile llvm-mingw.zip
-          $hash = (Get-FileHash llvm-mingw.zip -Algorithm SHA256).Hash.ToLower()
-          if ($hash -ne $env:LLVM_MINGW_SHA256) { throw "llvm-mingw.zip sha256 $hash, expected $env:LLVM_MINGW_SHA256" }
-          Expand-Archive llvm-mingw.zip -DestinationPath .
-          Rename-Item $name llvm-mingw
-
-      - name: Version
-        id: version
-        shell: pwsh
-        run: |
-          if ($env:GITHUB_REF -like 'refs/tags/*') { $v = $env:GITHUB_REF_NAME } else { $v = "dev-$($env:GITHUB_SHA.Substring(0, 8))" }
-          "name=$v" >> $env:GITHUB_OUTPUT
-
-      - name: Tools
-        shell: pwsh
-        run: |
-          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) { choco install ninja --no-progress -y | Out-Null }
-          cmake --version
-          ninja --version
-          (Get-Command ninja).Source
-
-      # a failing step's last lines become an error annotation, readable without signing in
-      - name: Configure
-        shell: pwsh
-        run: |
-          # every -D quoted: PowerShell splits an unquoted -DX=a.b at the dot
-          $ninja = (Get-Command ninja).Source
-          $out = & cmake -S . -B build -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninja" "-DCMAKE_BUILD_TYPE=Release" "-DXBE_RELEASE=ON" `
-            "-DXBE_RELEASE_VERSION=${{ steps.version.outputs.name }}" `
-            "-DCMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw.cmake" "-DLLVM_MINGW=$env:GITHUB_WORKSPACE/llvm-mingw" `
-            "-DCMAKE_C_FLAGS=-march=x86-64-v2" "-DCMAKE_CXX_FLAGS=-march=x86-64-v2" 2>&1
-          $code = $LASTEXITCODE
-          $out | Write-Output
-          if ($code) { "::error title=Configure::$((($out | Select-Object -Last 30) -join '%0A'))"; exit $code }
-
-      - name: Build and package
-        shell: pwsh
-        run: |
-          $out = & cmake --build build --target package_GenmaOnimusha 2>&1
-          $code = $LASTEXITCODE
-          $out | Write-Output
-          if ($code) { "::error title=Build::$((($out | Where-Object { $_ -match 'error|FAILED' } | Select-Object -First 30) -join '%0A'))"; exit $code }
-
-      - name: Modern controls regression tests
-        shell: pwsh
-        run: |
-          $cxx = "$env:GITHUB_WORKSPACE/llvm-mingw/bin/clang++.exe"
-          & $cxx -std=c++20 -static -Wall -Wextra tools/test_modern_controls.cpp -o build/test_modern_controls.exe
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          & ./build/test_modern_controls.exe
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          & $cxx -std=c++20 -static -Wall -Wextra -Isdk/runtime -Ibuild/GenmaOnimusha_symbols tools/test_modern_controls_hook.cpp -o build/test_modern_controls_hook.exe
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          & ./build/test_modern_controls_hook.exe
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-
-      - name: Updater regression tests
-        shell: pwsh
-        run: |
-          & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass `
-            -File tools/test_updater.ps1 -Launcher "$env:GITHUB_WORKSPACE/build/release/GenmaOnimusha.exe" `
-            -FixtureVersion '${{ steps.version.outputs.name }}'
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-
-      - name: Zip
-        shell: pwsh
-        run: |
-          $zip = "GenmaOnimusha-${{ steps.version.outputs.name }}-win64.zip"
-          Push-Location build/release
-          7z a -tzip -mx=9 "$env:GITHUB_WORKSPACE/$zip" GenmaOnimusha | Out-Null
-          Pop-Location
-          "ZIP=$zip" >> $env:GITHUB_ENV
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: GenmaOnimusha-${{ steps.version.outputs.name }}-win64
-          path: build/release/GenmaOnimusha
-
-      - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+      - name: Verify and publish both platforms
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" "${{ env.ZIP }}" --title "${{ github.ref_name }}" --generate-notes
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.metadata.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.metadata.outputs.commit }}
+        run: python3 tools/publish_release.py --directory release-assets --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT"

@@ -25,10 +25,16 @@ function(genma_core_test name)
     set_tests_properties(${name} PROPERTIES TIMEOUT 60)
 endfunction()
 
-genma_core_test(test_guest_memory tools/test_guest_memory.cpp)
-target_link_libraries(test_guest_memory PRIVATE xbe_portable_core)
-genma_core_test(test_disc_portable tools/test_disc_portable.cpp)
-target_link_libraries(test_disc_portable PRIVATE xbe_portable_core)
+# Link only the exercised components: a static C++ library can otherwise select
+# unrelated archive members through shared weak STL instantiations with lld.
+# xbe_portable_core is still compiled in full by the default build.
+genma_core_test(test_guest_memory tools/test_guest_memory.cpp
+    ${SDK}/runtime/kernel/memory.cpp ${SDK}/runtime/core/log.cpp)
+target_compile_options(test_guest_memory PRIVATE -fno-strict-aliasing)
+target_link_libraries(test_guest_memory PRIVATE Threads::Threads)
+genma_core_test(test_disc_portable tools/test_disc_portable.cpp
+    ${SDK}/runtime/kernel/disc.cpp ${SDK}/runtime/core/log.cpp)
+target_link_libraries(test_disc_portable PRIVATE Threads::Threads)
 genma_core_test(test_cpu_abi tools/test_cpu_abi.cpp tools/test_cpu_abi_weak.cpp)
 genma_core_test(test_modern_controls tools/test_modern_controls.cpp)
 genma_core_test(test_audio_distance tools/test_audio_distance.cpp)
@@ -41,3 +47,8 @@ add_custom_command(OUTPUT ${test_symbols}/image_symbols.h
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} VERBATIM)
 genma_core_test(test_modern_controls_hook tools/test_modern_controls_hook.cpp ${test_symbols}/image_symbols.h)
 target_include_directories(test_modern_controls_hook PRIVATE ${test_symbols})
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    genma_core_test(test_linux_fiber tools/test_linux_fiber.cpp ${SDK}/runtime/core/log.cpp)
+    target_link_libraries(test_linux_fiber PRIVATE Threads::Threads)
+endif()

@@ -1,0 +1,162 @@
+{
+  "schema": 1,
+  "baseline": "Ubuntu 22.04 / glibc 2.35 / x86-64-v2",
+  "compiler": "Clang 14.0.0 with GCC 11 libstdc++",
+  "packages": [
+    {
+      "name": "clang-14",
+      "version": "1:14.0.0-1ubuntu1.1",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/universe/l/llvm-toolchain-14/clang-14_14.0.0-1ubuntu1.1_amd64.deb",
+      "sha256": "15119d554a3cbe8ec6fd92dccde495de0eec4208151390ccb9c82ea05a057ced"
+    },
+    {
+      "name": "lld-14",
+      "version": "1:14.0.0-1ubuntu1.1",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/universe/l/llvm-toolchain-14/lld-14_14.0.0-1ubuntu1.1_amd64.deb",
+      "sha256": "66aa386bbd8ebd5dec54d77ba50047ae23e982e728c376eddac9ac448182ed15"
+    },
+    {
+      "name": "libclang-cpp14",
+      "version": "1:14.0.0-1ubuntu1.1",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/universe/l/llvm-toolchain-14/libclang-cpp14_14.0.0-1ubuntu1.1_amd64.deb",
+      "sha256": "462546f6149fbef99b47f3e1e01e0743d256ae279337c7f89a80a976dfd02175"
+    },
+    {
+      "name": "libllvm14",
+      "version": "1:14.0.0-1ubuntu1.1",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/l/llvm-toolchain-14/libllvm14_14.0.0-1ubuntu1.1_amd64.deb",
+      "sha256": "9044b614a6c7fb6262e7cbeb13dc731fc0c92bed96281c1a3920dd706442ee8e"
+    },
+    {
+      "name": "libclang-common-14-dev",
+      "version": "1:14.0.0-1ubuntu1.1",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/universe/l/llvm-toolchain-14/libclang-common-14-dev_14.0.0-1ubuntu1.1_amd64.deb",
+      "sha256": "a190eb2456b0cd398f04423eee53140d65f5f90d2353ad957e7e5884276d90b9"
+    },
+    {
+      "name": "libc6",
+      "version": "2.35-0ubuntu3.15",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/g/glibc/libc6_2.35-0ubuntu3.15_amd64.deb",
+      "sha256": "79e35256227e16a607c154cdeb8d76ff12d20e31de286ea7fd9ad3b96fe0452d"
+    },
+    {
+      "name": "libc6-dev",
+      "version": "2.35-0ubuntu3.15",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/g/glibc/libc6-dev_2.35-0ubuntu3.15_amd64.deb",
+      "sha256": "ce51ae233a9f800a040de2d0cd5983ef86f558c623b342c80942301d7f453f48"
+    },
+    {
+      "name": "linux-libc-dev",
+      "version": "5.15.0-202.212",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/l/linux/linux-libc-dev_5.15.0-202.212_amd64.deb",
+      "sha256": "3af9a45f616e3676827c31a9b7c43b78ea5c92f37af23d1c09db2a8f5ce294b2"
+    },
+    {
+      "name": "libgcc-11-dev",
+      "version": "11.4.0-1ubuntu1~22.04.3",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/g/gcc-11/libgcc-11-dev_11.4.0-1ubuntu1~22.04.3_amd64.deb",
+      "sha256": "35ed68622daf796ac010f63c73abd8aff851fc6d862038461b053b55dbec93a6"
+    },
+    {
+      "name": "libstdc++-11-dev",
+      "version": "11.4.0-1ubuntu1~22.04.3",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/g/gcc-11/libstdc++-11-dev_11.4.0-1ubuntu1~22.04.3_amd64.deb",
+      "sha256": "58e0cd2d1f758e75426eaa47a5e7228d1c86180500ed68d162bcbf7b0a1c5dd0"
+    },
+    {
+      "name": "gcc-11-base",
+      "version": "11.4.0-1ubuntu1~22.04.3",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/g/gcc-11/gcc-11-base_11.4.0-1ubuntu1~22.04.3_amd64.deb",
+      "sha256": "a0445a3889fd4441cc3b3a125d6d1589de3d2628ca4e92a352170ed0fea4d18b"
+    },
+    {
+      "name": "libgcc-s1",
+      "version": "12.3.0-1ubuntu1~22.04.3",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/g/gcc-12/libgcc-s1_12.3.0-1ubuntu1~22.04.3_amd64.deb",
+      "sha256": "d383e642d83263147f7b4b69fb92cf1036e5246c6be3accf10b77f986684589a"
+    },
+    {
+      "name": "libstdc++6",
+      "version": "12.3.0-1ubuntu1~22.04.3",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/g/gcc-12/libstdc++6_12.3.0-1ubuntu1~22.04.3_amd64.deb",
+      "sha256": "29ef3d289b272704b75141906c8f683db0f2bdb0942061366691333bfb289bdc"
+    },
+    {
+      "name": "libffi8",
+      "version": "3.4.2-4",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/libf/libffi/libffi8_3.4.2-4_amd64.deb",
+      "sha256": "b4f88c91fa6f4c942097be6abfc365fb133c5e147640168cbb7704fd855eac10"
+    },
+    {
+      "name": "libtinfo6",
+      "version": "6.3-2ubuntu0.3",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/n/ncurses/libtinfo6_6.3-2ubuntu0.3_amd64.deb",
+      "sha256": "3b8dff43a31168f5020928f2ab9a97324c5b47ae708311781f6bd01306c96214"
+    },
+    {
+      "name": "zlib1g",
+      "version": "1:1.2.11.dfsg-2ubuntu9.2",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/z/zlib/zlib1g_1.2.11.dfsg-2ubuntu9.2_amd64.deb",
+      "sha256": "9dc17e51a1be2d9ed63b7b84ef0e4e29c5abe6f1bc62cb03e7181483cce8a2f2"
+    },
+    {
+      "name": "libxml2",
+      "version": "2.9.13+dfsg-1ubuntu0.14",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/libx/libxml2/libxml2_2.9.13+dfsg-1ubuntu0.14_amd64.deb",
+      "sha256": "16e395b2c52d6ab232053468febc69f0876956ec2fae357a941a2a8dab36574f"
+    },
+    {
+      "name": "libicu70",
+      "version": "70.1-2",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/i/icu/libicu70_70.1-2_amd64.deb",
+      "sha256": "58a154f6307289813da2276f900498ef536ae7c0522d2cf31a3c3c5cf62dfd9a"
+    },
+    {
+      "name": "liblzma5",
+      "version": "5.2.5-2ubuntu1.2",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/x/xz-utils/liblzma5_5.2.5-2ubuntu1.2_amd64.deb",
+      "sha256": "a88fca7506963c443c42a578db6c35424336ae28abcdaa60c89f06d30aeb625b"
+    },
+    {
+      "name": "libz3-4",
+      "version": "4.8.12-1",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/universe/z/z3/libz3-4_4.8.12-1_amd64.deb",
+      "sha256": "d83fda4b2e58d9b30f0f85b02a3eb48ca7d33ca88e9d4584249e698bc2e451cf"
+    },
+    {
+      "name": "libedit2",
+      "version": "3.1-20210910-1build1",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/libe/libedit/libedit2_3.1-20210910-1build1_amd64.deb",
+      "sha256": "fb8783bdf0a59aaabf4e9b29192170f6cc17aa2eb94bc672c15add37ff39525b"
+    },
+    {
+      "name": "libbsd0",
+      "version": "0.11.5-1",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/libb/libbsd/libbsd0_0.11.5-1_amd64.deb",
+      "sha256": "09367acdf59f28ffb71ba7bc36c516cff03b2765930cf9be7bb7ea7273e4c312"
+    },
+    {
+      "name": "libmd0",
+      "version": "1.0.4-1build1",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/libm/libmd/libmd0_1.0.4-1build1_amd64.deb",
+      "sha256": "bcdad5e400aeb660f0337a1c5c1a77e3effa91d0803e64ce2d000e9006f67cdb"
+    },
+    {
+      "name": "libzstd1",
+      "version": "1.4.8+dfsg-3build1",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/libz/libzstd/libzstd1_1.4.8+dfsg-3build1_amd64.deb",
+      "sha256": "ae7db00ce8b093e50c994518b90203544e063b4bc574836a048bb142b950b2c9"
+    },
+    {
+      "name": "libvulkan1",
+      "version": "1.3.204.1-2",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/v/vulkan-loader/libvulkan1_1.3.204.1-2_amd64.deb",
+      "sha256": "192adcff489996b3398e7e7c0012b98e9586b46fe9a9eb13fb02c0feba88548b"
+    }
+  ],
+  "dxc": {
+    "version": "v1.8.2407",
+    "url": "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2407/linux_dxc_2024_07_31.x86_64.tar.gz",
+    "sha256": "b58725ac191df0686994fb9d54d27ee8dd3f180b023d562733112a499ea1195c"
+  }
+}

@@ -1,0 +1,76 @@
+name: build-linux
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      commit:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  linux-core:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - run: cmake --preset linux-core
+      - run: cmake --build --preset linux-core --parallel 4
+      - run: ctest --preset linux-core
+      - run: python3 -m unittest discover -s tools -p 'test_publish_release.py'
+  linux-window:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: Window and Vulkan dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev libxfixes-dev libxss-dev libxtst-dev libvulkan1 mesa-vulkan-drivers vulkan-validationlayers xvfb xauth
+      - run: cmake --preset linux-window
+      - run: cmake --build --preset linux-window --target genma_window_smoke test_wsl_controller_bridge --parallel 4
+      - run: ctest --preset linux-window -R '^(test_sdl_window|test_wsl_controller_bridge)$'
+      - run: timeout 45s xvfb-run -a env SDL_VIDEODRIVER=x11 ./out/build/linux-window/genma_window_smoke --backend vulkan --self-test
+  linux-package:
+    needs: [linux-core, linux-window]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache@v4
+        with:
+          path: out/downloads/linux
+          key: linux-x86_64-downloads-${{ hashFiles('config/linux-dependencies.lock.json') }}
+      - name: Host build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ninja-build libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev libxfixes-dev libxss-dev libxtst-dev libpulse-dev libvulkan-dev
+      - name: Prepare hash-pinned compiler, sysroot and DXC
+        run: python3 tools/prepare_linux_dependencies.py --output out/linux-deps
+      - name: Configure asset-free release
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+        run: |
+          cmake -S . -B out/build/linux-release -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/cmake/linux-release-toolchain.cmake" \
+            -DXBE_LINUX_DEPENDENCIES="$PWD/out/linux-deps" -DXBE_BUILD_RUNTIME=ON \
+            -DXBE_EXPERIMENTAL_LINUX_RUNTIME=ON -DXBE_RELEASE=ON -DXBE_BUILD_TESTS=ON \
+            -DXBE_RELEASE_VERSION="$RELEASE_VERSION" -DXBE_RELEASE_COMMIT="$RELEASE_COMMIT" \
+            -DSDL_WAYLAND=OFF -DSDL_KMSDRM=OFF
+      - run: cmake --build out/build/linux-release --parallel 3
+      - run: ctest --test-dir out/build/linux-release --output-on-failure
+      - run: cmake --build out/build/linux-release --target package_GenmaOnimusha --parallel 3
+      - name: Validate and archive the package
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+        run: |
+          python3 tools/test_linux_package.py --package out/build/linux-release/release/GenmaOnimusha
+          python3 tools/archive_linux_package.py --package out/build/linux-release/release/GenmaOnimusha --output release-assets
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: release-assets/*

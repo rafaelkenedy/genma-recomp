@@ -34,14 +34,14 @@ endif()
 
 # Two builds:
 #   development: the game in assets/, the whole exe built here (build.bat, any clang toolchain)
-#   release:     XBE_RELEASE=ON with the LLVM-MinGW toolchain, no game files needed: the runtime library, the launcher
+#   release:     XBE_RELEASE=ON with the platform release toolchain, no game files needed: the runtime library, the launcher
 #                and package_GenmaOnimusha (release/GenmaOnimusha/), which builds the game on the player's PC
-option(XBE_RELEASE "build the release without game code (needs cmake/llvm-mingw.cmake)" OFF)
+option(XBE_RELEASE "Build the asset-free release with the platform's bundled toolchain" OFF)
 set(XBE_RELEASE_TITLE "Genma Onimusha")
 set(XBE_UPDATE_REPOSITORY "rafaelkenedy/genma-recomp")
 if(NOT XBE_BUILD_RUNTIME)
     if(XBE_RELEASE)
-        message(FATAL_ERROR "XBE_RELEASE requires XBE_BUILD_RUNTIME=ON; Linux packages are not available yet")
+        message(FATAL_ERROR "XBE_RELEASE requires XBE_BUILD_RUNTIME=ON")
     endif()
     message(STATUS "Building native tools only; no graphical game runtime or game assets are required")
 elseif(XBE_RELEASE)
@@ -54,8 +54,37 @@ else()
 endif()
 
 option(XBE_BUILD_TESTS "Build asset-free core and game-policy regression tests" OFF)
+option(XBE_BUILD_CONTROLLER_BRIDGE "Build the Windows XInput helper for local WSL tests" OFF)
+if(XBE_BUILD_CONTROLLER_BRIDGE)
+    if(NOT WIN32)
+        message(FATAL_ERROR "The controller bridge helper must be built with a Windows toolchain")
+    endif()
+    add_executable(genma_controller_bridge tools/controller_bridge_win.cpp)
+    target_include_directories(genma_controller_bridge PRIVATE ${SDK}/runtime)
+endif()
 if(XBE_BUILD_TESTS)
     enable_testing()
     include(cmake/CoreTests.cmake)
+endif()
+
+if(XBE_BUILD_WINDOW_TEST)
+    add_executable(genma_window_smoke tools/window_smoke.cpp tools/window_vulkan.cpp)
+    target_link_libraries(genma_window_smoke PRIVATE SDL3::SDL3-static)
+    target_compile_options(genma_window_smoke PRIVATE -Wall -Wextra)
+    if(XBE_BUILD_TESTS)
+        add_test(NAME test_sdl_window COMMAND genma_window_smoke --self-test)
+        set_tests_properties(test_sdl_window PROPERTIES
+            ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy" TIMEOUT 30)
+    endif()
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND XBE_BUILD_TESTS AND (XBE_BUILD_RUNTIME OR XBE_BUILD_WINDOW_TEST))
+    add_executable(test_wsl_controller_bridge tools/test_wsl_controller_bridge.cpp
+        ${SDK}/runtime/core/wsl_controller_bridge.cpp ${SDK}/runtime/core/log.cpp)
+    target_include_directories(test_wsl_controller_bridge PRIVATE ${SDK}/runtime)
+    target_link_libraries(test_wsl_controller_bridge PRIVATE SDL3::SDL3-static)
+    target_compile_options(test_wsl_controller_bridge PRIVATE -UNDEBUG -Wall -Wextra)
+    add_test(NAME test_wsl_controller_bridge COMMAND test_wsl_controller_bridge)
+    set_tests_properties(test_wsl_controller_bridge PROPERTIES TIMEOUT 15)
 endif()
 

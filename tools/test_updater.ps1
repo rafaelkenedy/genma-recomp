@@ -48,6 +48,10 @@ try {
     Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     Assert ($null -ne (Select-Update (New-Release) 'v0.3.1' $repo $name)) 'New stable version was not selected.'
+    $mixed = New-Release
+    $mixed.assets = @([pscustomobject]@{name="$name-v0.4.0-linux-x86_64.tar.gz"; state='uploaded'; digest='sha256:' + ('b' * 64); size=200; browser_download_url="https://github.com/$repo/releases/download/v0.4.0/$name-v0.4.0-linux-x86_64.tar.gz"}) + @($mixed.assets)
+    $selected = Select-Update $mixed 'v0.3.1' $repo $name
+    Assert ($null -ne $selected -and $selected.url.EndsWith('-win64.zip')) 'Mixed-platform release did not select Windows ZIP.'
     Assert ($null -ne (Select-Update (New-Release 'v0.10.0') 'v0.9.0' $repo $name)) 'Versions compared lexically.'
     foreach ($current in @('v0.4.0', 'v0.5.0', 'dev', 'local', 'dev-1234')) {
         Assert ($null -eq (Select-Update (New-Release) $current $repo $name)) "Unexpected update from $current"

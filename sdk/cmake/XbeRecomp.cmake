@@ -7,8 +7,10 @@ file(TO_NATIVE_PATH "${XBE_SDK_DIR}" XBE_SDK_DIR_NATIVE)
 file(WRITE ${CMAKE_BINARY_DIR}/sdk_dir.txt "${XBE_SDK_DIR_NATIVE}\n")
 
 include(FetchContent)
-option(XBE_BUILD_RUNTIME "Build the graphical game runtime (currently Windows only)" ${WIN32})
-if(XBE_BUILD_RUNTIME AND NOT WIN32)
+option(XBE_BUILD_RUNTIME "Build the graphical game runtime" ${WIN32})
+option(XBE_EXPERIMENTAL_LINUX_RUNTIME "Enable the unfinished native SDL/Vulkan development runtime" OFF)
+option(XBE_BUILD_WINDOW_TEST "Build the standalone SDL window diagnostic (no game assets)" OFF)
+if(XBE_BUILD_RUNTIME AND NOT WIN32 AND NOT (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND XBE_EXPERIMENTAL_LINUX_RUNTIME))
     message(FATAL_ERROR "The graphical runtime is not ported to this platform yet. Configure with -DXBE_BUILD_RUNTIME=OFF to build the native tools and core tests.")
 endif()
 set(ZYDIS_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
@@ -17,17 +19,20 @@ set(ZYDIS_BUILD_DOXYGEN OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(zydis GIT_REPOSITORY https://github.com/zyantific/zydis.git GIT_TAG v4.1.1 GIT_SHALLOW TRUE)
 FetchContent_Declare(tomlplusplus GIT_REPOSITORY https://github.com/marzer/tomlplusplus.git GIT_TAG v3.4.0 GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(zydis tomlplusplus)
-if(XBE_BUILD_RUNTIME)
+if(XBE_BUILD_RUNTIME AND WIN32)
 FetchContent_Declare(imgui GIT_REPOSITORY https://github.com/ocornut/imgui.git GIT_TAG v1.91.0 GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(imgui)
+endif()
+if(XBE_BUILD_RUNTIME OR XBE_BUILD_WINDOW_TEST)
 # SDL3 for controllers, static so it links into the exe
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)
 set(SDL_STATIC ON CACHE BOOL "" FORCE)
 set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
-set(SDL_RENDER OFF CACHE BOOL "" FORCE)
-set(SDL_GPU OFF CACHE BOOL "" FORCE)
+set(SDL_RENDER ${XBE_BUILD_WINDOW_TEST} CACHE BOOL "" FORCE)
+set(SDL_GPU ${XBE_BUILD_WINDOW_TEST} CACHE BOOL "" FORCE)
 set(SDL_CAMERA OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(SDL3 GIT_REPOSITORY https://github.com/libsdl-org/SDL.git GIT_TAG release-3.4.16 GIT_SHALLOW TRUE)
-FetchContent_MakeAvailable(imgui SDL3)
+FetchContent_MakeAvailable(SDL3)
 endif()
 
 # x86 to C++ recompiler
@@ -44,6 +49,7 @@ target_compile_definitions(xbe_symbols PRIVATE _CRT_SECURE_NO_WARNINGS)
 target_link_libraries(xbe_symbols PRIVATE Zydis tomlplusplus::tomlplusplus)
 
 if(XBE_BUILD_RUNTIME)
+if(WIN32)
 set(XBE_IMGUI_SOURCES
     ${imgui_SOURCE_DIR}/imgui.cpp
     ${imgui_SOURCE_DIR}/imgui_draw.cpp
@@ -53,6 +59,19 @@ set(XBE_IMGUI_SOURCES
     ${imgui_SOURCE_DIR}/backends/imgui_impl_dx12.cpp)
 
 file(GLOB XBE_RUNTIME_SOURCES CONFIGURE_DEPENDS ${XBE_SDK_DIR}/runtime/*/*.cpp)
+list(FILTER XBE_RUNTIME_SOURCES EXCLUDE REGEX "/(linux|vulkan|sdl_audio)\\.cpp$")
+else()
+find_package(Vulkan REQUIRED)
+file(GLOB XBE_RUNTIME_SOURCES CONFIGURE_DEPENDS
+    ${XBE_SDK_DIR}/runtime/kernel/*.cpp ${XBE_SDK_DIR}/runtime/xdk/*.cpp
+    ${XBE_SDK_DIR}/runtime/core/*.cpp ${XBE_SDK_DIR}/runtime/cpu/*.cpp)
+list(FILTER XBE_RUNTIME_SOURCES EXCLUDE REGEX "/xnet\\.cpp$")
+list(APPEND XBE_RUNTIME_SOURCES
+    ${XBE_SDK_DIR}/runtime/app/linux.cpp ${XBE_SDK_DIR}/runtime/app/settings.cpp
+    ${XBE_SDK_DIR}/runtime/app/game_files.cpp ${XBE_SDK_DIR}/runtime/audio/sdl_audio.cpp
+    ${XBE_SDK_DIR}/runtime/gpu/vulkan.cpp ${XBE_SDK_DIR}/runtime/gpu/shaders.cpp
+    ${XBE_SDK_DIR}/runtime/gpu/texture.cpp ${XBE_SDK_DIR}/runtime/gpu/vertex.cpp)
+endif()
 # SDL's headers go to the input code alone (it is linked LINK_ONLY), so the generated sources' compile line stays the same
 set_source_files_properties(${XBE_SDK_DIR}/runtime/core/input.cpp PROPERTIES INCLUDE_DIRECTORIES "${sdl3_SOURCE_DIR}/include")
 endif()
@@ -81,6 +100,9 @@ function(add_xbe_image target xbe config partitions game_dir)
     set_source_files_properties(${GEN_SOURCES} PROPERTIES GENERATED TRUE
         COMPILE_OPTIONS "-O2;-fno-strict-aliasing;-Wno-unused-label;-Wno-parentheses-equality;-Wno-unused-variable")
     file(GLOB GAME_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/${game_dir}/*.cpp)
+    if(NOT WIN32)
+        list(FILTER GAME_SOURCES EXCLUDE REGEX "/acos_experiment\\.cpp$")
+    endif()
     # the xbe's SHA-1: the executable checks the game it finds is the release it was made from
     set(xbe_file ${CMAKE_CURRENT_SOURCE_DIR}/assets/${xbe})
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${xbe_file})
@@ -104,7 +126,14 @@ function(add_xbe_image target xbe config partitions game_dir)
     else()
         set(xaudio xaudio2)
     endif()
-    target_link_libraries(${target} PRIVATE tomlplusplus::tomlplusplus $<LINK_ONLY:SDL3::SDL3-static> d3d12 dxgi dxguid d3dcompiler ${xaudio} ole32 windowscodecs dbghelp winmm dwmapi ws2_32)
+    target_link_libraries(${target} PRIVATE tomlplusplus::tomlplusplus $<LINK_ONLY:SDL3::SDL3-static>)
+    if(WIN32)
+        target_link_libraries(${target} PRIVATE d3d12 dxgi dxguid d3dcompiler ${xaudio} ole32 windowscodecs dbghelp winmm dwmapi ws2_32)
+    else()
+        target_link_libraries(${target} PRIVATE SDL3::SDL3-static Vulkan::Vulkan pthread dl)
+        target_compile_definitions(${target} PRIVATE XBE_RAW_VERTICES=0)
+        target_compile_options(${target} PRIVATE -march=x86-64-v2)
+    endif()
     # lld keeps the recompiled weak functions overridable by the host ones
     target_link_options(${target} PRIVATE -fuse-ld=lld -g)
     # the game's HD texture replacements (gpu/replace.h) beside the exe
@@ -124,6 +153,11 @@ endfunction()
 # The config's [xbe] sha1 names the xbe the release is made for. Needs the LLVM-MinGW toolchain (cmake/llvm-mingw.cmake),
 # the one the player's build uses too.
 function(add_xbe_release target xbe config game_dir)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        include(${XBE_SDK_DIR}/cmake/LinuxRelease.cmake)
+        add_xbe_linux_release(${target} ${xbe} ${config} ${game_dir})
+        return()
+    endif()
     if(NOT MINGW)
         message(FATAL_ERROR "add_xbe_release: build with the LLVM-MinGW toolchain, the one a release bundles")
     endif()
@@ -149,6 +183,7 @@ function(add_xbe_release target xbe config game_dir)
 
     # the runtime library
     file(GLOB GAME_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/${game_dir}/*.cpp)
+    list(FILTER GAME_SOURCES EXCLUDE REGEX "/acos_experiment\\.cpp$")
     set(XBE_HASH ${CMAKE_CURRENT_BINARY_DIR}/${target}_release_xbe.cpp)
     file(CONFIGURE OUTPUT ${XBE_HASH} CONTENT "extern const char kImageSha1[] = \"${xbe_sha1}\";\n")
     add_library(${target}_runtime STATIC ${XBE_RUNTIME_SOURCES} ${XBE_HOST_SOURCES} ${GAME_SOURCES} ${XBE_IMGUI_SOURCES}

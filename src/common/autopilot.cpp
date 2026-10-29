@@ -62,7 +62,7 @@ void AutopilotPad(int port, input::Pad& p) {
     if (port != 0) return;
     auto now = Clock::now();
     std::lock_guard<std::mutex> lock(g_lock);
-    std::string cmd = (app::ExeDir() / "cmd").string();
+    std::string cmd = (app::CacheDir() / "cmd").string();
     if (FILE* f = std::fopen(cmd.c_str(), "r")) {
         char b[96] = {};
         double len = 0.25;
