@@ -1,13 +1,13 @@
 # Genma Onimusha - PC port (Xbox static recompilation)
 
-An unofficial native Windows port of the original Xbox version of **Genma Onimusha**, made by statically recompiling the game's executable to C++ with [Xbox XBE Recomp](https://github.com/TGP482/XboxXBERecomp).
+An unofficial native Windows port, with experimental native Linux support, of the original Xbox version of **Genma Onimusha**, made by statically recompiling the game's executable to C++ with [Xbox XBE Recomp](https://github.com/TGP482/XboxXBERecomp).
 
-**Latest release: [v0.5.2](../../releases/tag/v0.5.2)** · [all releases](../../releases)
+**Latest release: [v0.6.0](../../releases/tag/v0.6.0)** · [all releases](../../releases)
 
 > [!IMPORTANT]
 > This repository and its releases contain **no game code and no game assets**. You need your own legally acquired copy of the game. The release builds the game's code on your PC, from your copy, on the first start.
 
-## Playing
+## Playing on Windows
 
 1. Download the latest `GenmaOnimusha-*-win64.zip` from [Releases](../../releases) and extract it to a folder you can write to.
 2. Run `GenmaOnimusha.exe`.
@@ -71,7 +71,21 @@ They need v0.3.0 or later. The textures are not part of this repository or its r
 - A GPU with Direct3D 12
 - About 500 MB of free disk space (the release, the toolchain and the built game)
 
-## Improvements over the original
+## Playing on Linux (experimental)
+
+Download `GenmaOnimusha-v0.6.0-linux-x86_64.tar.gz` from [Releases](../../releases/tag/v0.6.0), extract the entire folder, and run:
+
+```sh
+cd GenmaOnimusha
+./GenmaOnimusha --check-install
+./GenmaOnimusha --game '/path/to/Genma Onimusha.iso'
+```
+
+An extracted game folder is also supported. The first launch builds your copy with the bundled compiler; later starts use `./GenmaOnimusha` directly. Requires an x86-64-v2 CPU, glibc 2.35+, Vulkan drivers, X11/XWayland and PulseAudio-compatible output. No development tools, Wine or Proton are needed to play.
+
+Saves, settings and build caches use XDG directories outside the package. Updates are manual: extract a new release into a new folder. The settings menu, HD texture replacements and render scaling are not available on Linux yet; full gameplay/visual/audio parity and Steam Deck support are still being validated. See [Linux usage, controls and limitations](docs/linux-release.md).
+
+## Windows improvements over the original
 
 - Rendering at the output's resolution (or above, as supersampling), shown in the original 4:3 with bars; the game has no widescreen mode, its backgrounds are pre-rendered 640x480 images
 - The black frame the game leaves for TV overscan is cut by default (3.3% per edge), so the picture reaches the top and bottom of the screen; **Picture: Original** keeps it
@@ -83,6 +97,7 @@ They need v0.3.0 or later. The textures are not part of this repository or its r
 
 | Version | What |
 | --- | --- |
+| [v0.6.0](../../releases/tag/v0.6.0) | Experimental native Linux SDL/Vulkan runtime and CLI package with bundled compiler/DXC and XDG storage; separate Windows/Linux pipelines, joint release publication and SHA-256 checksums |
 | [v0.5.2](../../releases/tag/v0.5.2) | Fix modern stick movement cancelling soul absorption and leaving attacks during their native cancel windows; preserve guard priority and control locks |
 | [v0.5.1](../../releases/tag/v0.5.1) | Fix analog movement through camera cuts: retain the character's actual heading, preserve it through small stick adjustments, and clear retention on guard or other action states |
 | [v0.5.0](../../releases/tag/v0.5.0) | Modern camera-relative analog controls, direction retained through camera cuts, native guard steps and dodges; D-pad keeps tank controls; configurable in F1 |
