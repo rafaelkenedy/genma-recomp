@@ -12,6 +12,8 @@ struct Pad {
 };
 
 void Init();  // window thread, before boot
+void Pump();  // Linux: window thread owns SDL event pumping and gamepad hotplug
+void SetKeyboardPad(const Pad& pad);  // optional host keyboard controller, port 0
 // the controller on that port, then GameInfo::pad
 Pad Poll(int port);
 void Rumble(int port, uint16_t left, uint16_t right);

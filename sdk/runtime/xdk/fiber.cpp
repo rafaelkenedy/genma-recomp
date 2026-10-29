@@ -11,8 +11,12 @@
 #include <mutex>
 #include <unordered_map>
 
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#else
+#include "xdk/fiber_linux.h"
+#endif
 
 using namespace kernel;
 

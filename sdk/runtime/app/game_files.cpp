@@ -6,7 +6,9 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 #include <algorithm>
 #include <cwctype>
@@ -62,6 +64,24 @@ bool ReadHostFile(const fs::path& path, std::vector<uint8_t>& out) {
 }  // namespace
 
 bool FindGame(GameFiles& game) {
+#ifndef _WIN32
+    if (const char* supplied = std::getenv("XBE_GAME_PATH"); supplied && *supplied) {
+        fs::path path(supplied);
+        std::unique_ptr<kernel::Disc> disc;
+        std::vector<uint8_t> xbe;
+        if (fs::is_directory(path)) {
+            if (!ReadHostFile(path / IMAGE_XBE, xbe)) { LOGE("game: missing %s", IMAGE_XBE); return false; }
+        } else {
+            disc = std::make_unique<kernel::Disc>();
+            std::string error;
+            if (!disc->Open(path, error) || !disc->Load(IMAGE_XBE, xbe)) { LOGE("game: %s", error.c_str()); return false; }
+        }
+        if (Sha1(xbe) != kImageSha1) { LOGE("game: XBE SHA-1 does not match this release"); return false; }
+        game = {fs::is_directory(path) ? path : path.parent_path(), std::move(xbe)};
+        kernel::MountDisc(std::move(disc));
+        return true;
+    }
+#endif
     fs::path assets = FindAssets();
     std::vector<fs::path> isos;
     std::error_code ec;
@@ -128,9 +148,14 @@ bool FindGame(GameFiles& game) {
     }
 
     if (other_name.empty()) {
+#ifdef _WIN32
         MessageBoxW(nullptr, kGame.missing, kGame.short_title, MB_ICONERROR);
+#else
+        LOGE("game: assets missing; supply assets/default.xbe and its folders or an ISO");
+#endif
         return false;
     }
+#ifdef _WIN32
     std::wstring text = other_name.filename().wstring() +
                         L" is a different release of the game than this build was made from, and will most likely "
                         L"crash.\n\nStart it anyway?";
@@ -138,6 +163,10 @@ bool FindGame(GameFiles& game) {
     game = std::move(other);
     kernel::MountDisc(std::move(other_disc));
     return true;
+#else
+    LOGE("game: refusing a different XBE release; expected SHA-1 %s", kImageSha1);
+    return false;
+#endif
 }
 
 }  // namespace app

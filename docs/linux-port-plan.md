@@ -2,7 +2,9 @@
 
 Data: 28/10/2026. Base examinada: `a844f89`, v0.5.2.
 Issue: https://github.com/rafaelkenedy/genma-recomp/issues/8
-Estado: primeira entrega implementada localmente — ferramentas Linux e base de testes; runtime gráfico e distribuição ainda pendentes.
+Estado: ferramentas, testes e diagnóstico de janela implementados; runtime Linux/Vulkan experimental já inicia o jogo e mostra a tela de título. Gameplay, paridade gráfica e distribuição continuam pendentes.
+
+Separação de CI e publicação Windows/Linux: [ci-release-multiplatform-plan.md](ci-release-multiplatform-plan.md).
 
 ## Entrega pretendida
 
@@ -126,7 +128,13 @@ WSL ajuda no build/testes, mas não comprova compatibilidade com Gamescope, driv
 
 Pendências da etapa 1: exercitar mais APIs do kernel quando houver um host Linux de boot e auditar fibers/símbolos usados. Nenhuma validação de GPU, áudio Linux, Steam Deck, launcher Linux ou AppImage foi feita nesta primeira entrega. O experimento local de acosf e os diretórios de assets de trabalho ficam fora das alterações publicáveis.
 
+### Diagnóstico de janela iniciado
+
+O alvo opcional `genma_window_smoke` e o preset `linux-window` validam a janela SDL3 com apresentação por software e, por argumento explícito, Vulkan. O self-test passou com SDL dummy e com X11/WSLg, incluindo resize, fullscreen, eventos de teclado, controle virtual e imagem 4:3. A apresentação Vulkan sobre llvmpipe passou com 95 quadros e comparação exata dos 691.200 pixels da leitura final contra a referência. O Dozen/Mesa 26.2.2, compilado separadamente, também passou na RTX 3050 via D3D12/GPU-PV: 136 quadros, dois readbacks e zero pixels diferentes. Houve avisos de não conformidade do Dozen e de estrutura desconhecida pela camada de validação antiga. A prova dos shaders/operações do jogo e a migração do host continuam pendentes; esse diagnóstico não cria um executável Linux do jogo. Detalhes, comandos e limitações em [linux-window-test.md](linux-window-test.md).
+
 ## Referências técnicas verificadas
+
+A integração experimental posterior escolheu Vulkan direto atrás de `gpu::Backend` e manteve D3D12 no Windows. O boot real e as telas iniciais passaram na RTX 3050 via Dozen, com shaders do tradutor compilados por DXC e áudio SDL. Isso não satisfaz ainda os critérios de gameplay e paridade das etapas 2/3. Build, controles, resultados e limitações estão em [linux-runtime-test.md](linux-runtime-test.md).
 
 - [SDL GPU](https://wiki.libsdl.org/SDL3/CategoryGPU): API gráfica multiplataforma; a cobertura das operações do nosso backend ainda exige a prova proposta.
 - [SDL_shadercross](https://github.com/libsdl-org/SDL_shadercross): tradução de shaders HLSL/SPIR-V para SDL GPU.

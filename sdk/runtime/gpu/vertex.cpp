@@ -3,7 +3,21 @@
 #include <algorithm>
 #include <cstring>
 
+#ifdef _WIN32
 #include <dxgiformat.h>
+#else
+// VertexElement stores the DXGI format identifiers used by the Windows backend.
+// The Linux development backend uses the converted float4 path, without a DXGI dependency.
+enum : uint8_t {
+    DXGI_FORMAT_R32G32B32A32_FLOAT = 2, DXGI_FORMAT_R32G32B32_FLOAT = 6,
+    DXGI_FORMAT_R32G32_FLOAT = 16, DXGI_FORMAT_R32_FLOAT = 41,
+    DXGI_FORMAT_B8G8R8A8_UNORM = 87, DXGI_FORMAT_R16_SNORM = 58,
+    DXGI_FORMAT_R16G16_SNORM = 37, DXGI_FORMAT_R16G16B16A16_SNORM = 13,
+    DXGI_FORMAT_R8_UNORM = 61, DXGI_FORMAT_R8G8_UNORM = 49, DXGI_FORMAT_R8G8B8A8_UNORM = 28,
+    DXGI_FORMAT_R16_SINT = 59, DXGI_FORMAT_R16G16_SINT = 38,
+    DXGI_FORMAT_R16G16B16A16_SINT = 14, DXGI_FORMAT_R32_UINT = 42,
+};
+#endif
 
 #include "core/log.h"
 #include "kernel/kernel.h"

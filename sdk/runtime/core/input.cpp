@@ -18,6 +18,7 @@ namespace {
 std::mutex g_lock;
 bool g_sdl = false;
 SDL_Gamepad* g_pads[4] = {};
+Pad g_keyboard;
 
 void AddPad(SDL_JoystickID id) {
     for (SDL_Gamepad* pad : g_pads)
@@ -40,6 +41,7 @@ void RemovePad(SDL_JoystickID id) {
 
 // once a millisecond at most, however many ports and threads read
 void UpdatePads() {
+#ifdef _WIN32
     static uint64_t last = 0;
     uint64_t now = SDL_GetTicks();
     if (!g_sdl || now == last) return;
@@ -50,9 +52,27 @@ void UpdatePads() {
         if (e.type == SDL_EVENT_GAMEPAD_ADDED) AddPad(e.gdevice.which);
         else if (e.type == SDL_EVENT_GAMEPAD_REMOVED) RemovePad(e.gdevice.which);
     }
+#endif
 }
 
 }  // namespace
+
+void Pump() {
+#ifndef _WIN32
+    std::lock_guard lock(g_lock);
+    if (!g_sdl) return;
+    SDL_Event e;
+    while (SDL_PeepEvents(&e, 1, SDL_GETEVENT, SDL_EVENT_GAMEPAD_ADDED, SDL_EVENT_GAMEPAD_REMOVED) == 1) {
+        if (e.type == SDL_EVENT_GAMEPAD_ADDED) AddPad(e.gdevice.which);
+        else if (e.type == SDL_EVENT_GAMEPAD_REMOVED) RemovePad(e.gdevice.which);
+    }
+#endif
+}
+
+void SetKeyboardPad(const Pad& pad) {
+    std::lock_guard lock(g_lock);
+    g_keyboard = pad;
+}
 
 void Init() {
     // WGI reads the triggers apart and HIDAPI takes PlayStation and Switch pads. Reads come from the guest's threads,
@@ -105,6 +125,16 @@ Pad Poll(int port) {
             p.ly = int16_t(-1 - axis(SDL_GAMEPAD_AXIS_LEFTY));
             p.rx = int16_t(axis(SDL_GAMEPAD_AXIS_RIGHTX));
             p.ry = int16_t(-1 - axis(SDL_GAMEPAD_AXIS_RIGHTY));
+        }
+    }
+    if (port == 0) {
+        std::lock_guard lock(g_lock);
+        if (g_keyboard.connected) {
+            p.connected = true;
+            p.buttons |= g_keyboard.buttons;
+            for (int i = 0; i < 8; i++) p.analog[i] = std::max(p.analog[i], g_keyboard.analog[i]);
+            if (g_keyboard.lx) p.lx = g_keyboard.lx;
+            if (g_keyboard.ly) p.ly = g_keyboard.ly;
         }
     }
     if (app::kGame.pad) app::kGame.pad(port, p);

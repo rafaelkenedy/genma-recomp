@@ -5,7 +5,11 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <SDL3/SDL.h>
+#endif
 
 #include <algorithm>
 #include <cstdlib>
@@ -30,7 +34,7 @@ void EnvFlag(const char* name, bool& v) {
     if (const char* e = std::getenv(name)) v = e[0] != '0';
 }
 
-std::filesystem::path File() { return ExeDir() / kGame.settings; }
+std::filesystem::path File() { return ConfigDir() / kGame.settings; }
 
 }  // namespace
 
@@ -119,6 +123,7 @@ void LogSettings() {
 }
 
 Mode Desktop() {
+#ifdef _WIN32
     HMONITOR mon = MonitorFromWindow(static_cast<HWND>(Window()), MONITOR_DEFAULTTOPRIMARY);
     MONITORINFOEXW mi{};
     mi.cbSize = sizeof(mi);
@@ -127,6 +132,10 @@ Mode Desktop() {
     if (GetMonitorInfoW(mon, &mi) && EnumDisplaySettingsW(mi.szDevice, ENUM_REGISTRY_SETTINGS, &dm))
         return {dm.dmPelsWidth, dm.dmPelsHeight};
     return {uint32_t(GetSystemMetrics(SM_CXSCREEN)), uint32_t(GetSystemMetrics(SM_CYSCREEN))};
+#else
+    const SDL_DisplayMode* m = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
+    return m ? Mode{uint32_t(m->w), uint32_t(m->h)} : Mode{1280, 800};
+#endif
 }
 
 Mode Output() {

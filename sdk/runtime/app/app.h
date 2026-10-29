@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <mutex>
 #include <string>
@@ -60,6 +61,16 @@ void AskQuit();             // window thread, Esc: the quit confirmation, or clo
 void DrawMenu(double fps);  // inside the ImGui frame, UiLock held
 
 std::filesystem::path ExeDir();
+// The packaged Linux launcher selects writable XDG paths; development and Windows retain their layout.
+inline std::filesystem::path WritableDir(const char* name) {
+#ifndef _WIN32
+    if (const char* path = std::getenv(name); path && *path) return std::filesystem::path(path);
+#endif
+    return ExeDir();
+}
+inline std::filesystem::path DataDir() { return WritableDir("XBE_DATA_DIR"); }
+inline std::filesystem::path ConfigDir() { return WritableDir("XBE_CONFIG_DIR"); }
+inline std::filesystem::path CacheDir() { return WritableDir("XBE_CACHE_DIR"); }
 // the game in assets (game_files.cpp): its folder and this executable's xbe, from the extracted files or a disc
 // image (.iso), which it mounts as D:; false after telling the player what is missing
 struct GameFiles {

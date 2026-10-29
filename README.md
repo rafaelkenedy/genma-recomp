@@ -137,10 +137,56 @@ ctest --preset linux-core
 
 This builds native `xbe_recomp` and `xbe_symbols` tools and tests memory aliases,
 disc access, hook/continuation ABI, modern controls and audio attenuation without
-game assets. It does not yet build a playable Linux game or AppImage.
+game assets. This preset only builds tools and tests; the experimental game runtime is separate.
 `XBE_BUILD_RUNTIME` defaults to on for Windows and off for Linux;
 `XBE_BUILD_TESTS=ON` enables these tests on either platform. The Linux core build
 does not download SDL or ImGui. See [the Linux/Steam Deck plan](docs/linux-port-plan.md).
+
+For the standalone SDL window diagnostic (no game assets):
+
+```sh
+cmake --preset linux-window
+cmake --build --preset linux-window --target genma_window_smoke --parallel 4
+./out/build/linux-window/genma_window_smoke
+```
+
+It draws a 4:3 test image using software presentation. F11 toggles fullscreen,
+R resizes, arrows or the left stick move the marker, and Esc quits.
+See [window testing](docs/linux-window-test.md) for WSLg, dependencies and automated checks.
+
+For the experimental native game target, see [Linux/Vulkan runtime testing](docs/linux-runtime-test.md).
+It requires local game assets and a Linux DXC compiler. Boot and title-screen rendering have been tested;
+gameplay and visual parity are still being validated.
+
+Use `--backend vulkan` to test explicit Vulkan presentation through SDL GPU.
+The pattern is still generated on the CPU; Vulkan uploads, scales and presents it.
+`--backend vulkan --self-test` also reads the output texture back and compares
+it with the reference. The log identifies the selected device, including CPU
+Vulkan drivers such as llvmpipe; this is not yet the game's 3D renderer.
+
+### Experimental Linux package
+
+The platform workflows build independent Windows ZIP and Linux x86-64 tar.gz packages.
+The Linux package includes a CLI launcher, pinned Clang 14/sysroot and DXC. It builds
+your own game locally and stores saves, settings and build caches in XDG directories.
+It requires glibc 2.35+, an x86-64-v2 CPU and Vulkan drivers; updates are manual.
+See [Linux package usage](docs/linux-release.md) and [CI/release design](docs/ci-release-multiplatform-plan.md).
+
+To build it on Linux with the development libraries listed in `.github/workflows/build-linux.yml`:
+
+```sh
+python3 tools/prepare_linux_dependencies.py --output out/linux-deps
+cmake -S . -B out/build/linux-release -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_TOOLCHAIN_FILE="$PWD/cmake/linux-release-toolchain.cmake" \
+  -DXBE_LINUX_DEPENDENCIES="$PWD/out/linux-deps" -DXBE_BUILD_RUNTIME=ON \
+  -DXBE_EXPERIMENTAL_LINUX_RUNTIME=ON -DXBE_RELEASE=ON -DXBE_RELEASE_VERSION=dev-local \
+  -DSDL_WAYLAND=OFF -DSDL_KMSDRM=OFF
+cmake --build out/build/linux-release --target package_GenmaOnimusha --parallel 3
+```
+
+Public builds contain no game assets or recompiled game sources. Tag publication waits
+for both platform packages, verifies their commit/hashes, then publishes them together
+with `SHA256SUMS` and `release-manifest.json`.
 
 ## Layout
 
