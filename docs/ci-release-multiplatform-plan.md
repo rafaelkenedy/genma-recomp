@@ -9,11 +9,32 @@ Data: 28/10/2026. Escopo: CI separado por plataforma e publicação dos dois pac
 - `test_linux_package.py` verifica hashes, ausência de assets, toolchain relocada, exceções C++, link sintético de todo o runtime e layout somente leitura. O tar preserva symlinks e permissões executáveis.
 - O publicador verifica versão/commit/hashes de ambas as plataformas antes de criar um draft. Só publica após conferir os uploads; reexecuções idênticas são aceitas e arquivos diferentes nunca são sobrescritos.
 - Validação concluída: `actionlint` dos três workflows; cinco testes do publicador; sete testes do núcleo no toolchain de desenvolvimento e oito testes no toolchain de distribuição, incluindo a ponte SDL; build do pacote Windows, duas regressões de controles e todos os fixtures do updater, incluindo assets mistos.
-- A primeira publicação revelou que o endpoint REST por tag não encontra rascunhos. O publicador passou a localizar a tag na lista autenticada e paginada de releases e consultar os uploads pelo ID da release. O teste adicional garante a retomada de um rascunho existente sem recriá-lo; a verificação dos quatro uploads continua obrigatória antes de publicar.
+- A primeira publicação revelou que o endpoint REST por tag não encontra rascunhos. A troca pela lista REST autenticada também falhou na v0.6.1: o rascunho foi criado, mas não apareceu na consulta feita pelo Actions. A correção resolve releases existentes por GraphQL e preserva diretamente o ID retornado ao criar uma release. Uploads, conferência e publicação usam esse ID; a verificação dos quatro arquivos continua obrigatória antes de publicar.
 - O teste do pacote Linux passou: hashes/lista permitida, dependências privadas ELF, ausência de assets, compilador relocado, exceções C++, link sintético de todo o runtime, layout completo em pasta UTF-8/com espaços e somente leitura, diretórios XDG e símbolos do launcher limitados a glibc 2.35. O teste somente leitura usa uma cópia independente, sem mudar permissões do pacote original.
 - Prova local do pacote: tar de aproximadamente 189 MiB, 33 unidades recompiladas/compiladas a partir de `assets/default.xbe` pela CLI embarcada, seguida de uma segunda chamada sem recompilação. O estado ficou em `out/package validation/{config,data,cache}`. A execução real de 60 segundos via Dozen/RTX 3050 terminou com código 0, último contador de 1.440 quadros/7.041 draws/dez pipelines; saída SDL float estéreo de 48 kHz inicializada. A captura do quadro 600 foi inspecionada e mostra a tela de título. Logs em `out/linux-package-{test,game-build,cached-build,game-run}.log`; nenhum dado dessa prova entra nos artifacts do CI. Isso valida o uso do pacote no ambiente WSL disponível, sem substituir uma prova em Linux nativo/Steam Deck.
 - Os nomes antigos dos checks não estão exigidos por proteção de branch: a API retornou `Branch not protected` para `main` e nenhum ruleset em 28/10/2026. O PR #28 da base de ferramentas ainda estava aberto; seus commits estão incluídos nesta branch.
 - Steam Deck, drivers Linux nativos, gameplay completo e paridade audiovisual continuam pendentes. A issue #8 permanece aberta; nenhuma tag/release é criada ao preparar esta branch.
+
+## Publicação e recuperação de releases
+
+Atualização de 30/10/2026: `tools/publish_release.py` verifica os manifestos Windows/Linux, a versão, o commit, o tamanho e o SHA-256 dos pacotes antes de alterar a release. Depois produz `release-manifest.json` e `SHA256SUMS`.
+
+O fluxo de publicação é:
+
+1. Consultar `repository.release(tagName)` por GraphQL e obter o `databaseId`. Consultar a release existente pelo ID na API REST. Erros de acesso/GraphQL interrompem o fluxo; não são tratados como ausência da release.
+2. Se a release não existir, gerar as notas e criar um rascunho por REST. Preservar o ID retornado nessa criação, sem depender de outra busca pela tag ou da listagem de releases.
+3. Enviar somente os arquivos ausentes ao endpoint de upload do ID. Arquivos existentes precisam ter o mesmo tamanho e SHA-256; divergências interrompem a publicação sem sobrescrever arquivos. Uma release já pública e incompleta também é recusada.
+4. Consultar novamente o ID, conferir os quatro arquivos e só então publicar com `PATCH draft=false`. Uma reexecução com os mesmos arquivos não faz uploads nem publica outra vez.
+
+Os nove testes de `tools/test_publish_release.py` cobrem criação com rascunho ausente da busca, retomada de rascunho com upload parcial, reexecução idêntica, artefatos alterados, falhas de GraphQL e recusa de publicação sem arquivos válidos. Para executá-los:
+
+```sh
+python3 -I -m unittest discover -s tools -p 'test_publish_release.py'
+```
+
+Na recuperação da v0.6.1, os artifacts originais do CI foram baixados e conferidos com os digests SHA-256 registrados pelo Actions. O publicador corrigido concluiu o rascunho existente usando a credencial do mantenedor. A tag e os pacotes foram preservados. A reexecução do job antigo passou ao verificar a release já pública; isso valida a recuperação, mas não exercita a criação de um rascunho com o `GITHUB_TOKEN`.
+
+Reexecutar um workflow de uma tag antiga continua usando o código daquela tag. Para recuperar uma publicação interrompida por um defeito no publicador, usar os artifacts da execução original e a versão corrigida do publicador, passando a tag e o commit originais. Não mover a tag para incorporar uma correção da esteira. O caminho completo com o token do Actions deve ser confirmado na próxima publicação por tag que inclua esta correção.
 
 ## Estado examinado
 

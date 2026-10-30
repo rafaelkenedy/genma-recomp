@@ -2,7 +2,7 @@
 
 An unofficial native Windows port, with experimental native Linux support, of the original Xbox version of **Genma Onimusha**, made by statically recompiling the game's executable to C++ with [Xbox XBE Recomp](https://github.com/TGP482/XboxXBERecomp).
 
-**Latest release: [v0.6.0](../../releases/tag/v0.6.0)** · [all releases](../../releases)
+**Latest release: [v0.6.1](../../releases/tag/v0.6.1)** · [all releases](../../releases)
 
 > [!IMPORTANT]
 > This repository and its releases contain **no game code and no game assets**. You need your own legally acquired copy of the game. The release builds the game's code on your PC, from your copy, on the first start.
@@ -73,7 +73,7 @@ They need v0.3.0 or later. The textures are not part of this repository or its r
 
 ## Playing on Linux (experimental)
 
-Download `GenmaOnimusha-v0.6.0-linux-x86_64.tar.gz` from [Releases](../../releases/tag/v0.6.0), extract the entire folder, and run:
+Download `GenmaOnimusha-v0.6.1-linux-x86_64.tar.gz` from [Releases](../../releases/tag/v0.6.1), extract the entire folder, and run:
 
 ```sh
 cd GenmaOnimusha
@@ -97,6 +97,7 @@ Saves, settings and build caches use XDG directories outside the package. Update
 
 | Version | What |
 | --- | --- |
+| [v0.6.1](../../releases/tag/v0.6.1) | VBlank frame pacing; Windows shader pipeline warmup, HD texture caches and camera-directed background prefetch; fixes isolated mismatched frames when converting animation atlases |
 | [v0.6.0](../../releases/tag/v0.6.0) | Experimental native Linux SDL/Vulkan runtime and CLI package with bundled compiler/DXC and XDG storage; separate Windows/Linux pipelines, joint release publication and SHA-256 checksums |
 | [v0.5.2](../../releases/tag/v0.5.2) | Fix modern stick movement cancelling soul absorption and leaving attacks during their native cancel windows; preserve guard priority and control locks |
 | [v0.5.1](../../releases/tag/v0.5.1) | Fix analog movement through camera cuts: retain the character's actual heading, preserve it through small stick adjustments, and clear retention on guard or other action states |
@@ -202,6 +203,12 @@ cmake --build out/build/linux-release --target package_GenmaOnimusha --parallel 
 Public builds contain no game assets or recompiled game sources. Tag publication waits
 for both platform packages, verifies their commit/hashes, then publishes them together
 with `SHA256SUMS` and `release-manifest.json`.
+
+The publisher resolves existing releases through GraphQL and uses the release ID
+for uploads and publication. A new draft keeps the ID returned by its creation;
+publication does not depend on finding it again in the REST release list.
+See [release publication and recovery](docs/ci-release-multiplatform-plan.md#publicação-e-recuperação-de-releases)
+for verification, retries and recovery of an older tag.
 
 ## Layout
 
