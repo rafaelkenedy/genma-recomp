@@ -154,14 +154,24 @@ def frame_images(pimg, pick, mode, m):
     if mode != 'matched' or nf < 3:
         return imgs, 0
     score = np.array([m[i, pick[i]] for i in range(nf)])
-    bad = score < np.median(score) - 0.1
+    median = np.median(score)
+    # Keep the original large-outlier rule. A smaller isolated mismatch can
+    # still flash: Room001's sky frame 18 scores .888 against neighbors at .953.
+    # Require both a robust global deviation and a local dip; a noisy match or
+    # a smooth change of phase must not be treated as a missing source frame.
+    spread = 1.4826 * np.median(np.abs(score - median))
+    limit = max(0.04, 6 * spread)
+    neighbors = (np.roll(score, 1) + np.roll(score, -1)) / 2
+    bad = (score < median - 0.1) | ((score < median - limit) & (neighbors - score > limit))
     out = list(imgs)
+    replaced = 0
     for i in np.flatnonzero(bad):
         a, b = (i - 1) % nf, (i + 1) % nf
         if bad[a] or bad[b]:
             continue
         out[i] = ((imgs[a].astype(np.uint16) + imgs[b]) // 2).astype(np.uint8)
-    return out, int(bad.sum())
+        replaced += 1
+    return out, replaced
 
 
 def encode(img, out_path, opaque, texconv, tmp_dir):

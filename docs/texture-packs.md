@@ -46,4 +46,7 @@ python -I tools/convert_anim_atlas.py <dump> <pacote>/SK_Res/inject/textures <ex
 - **Animações:** o pacote guarda um quadro por arquivo, o Xbox junta vários quadros num atlas, às vezes dividido em
   vários atlas seguidos (a água do rio são 4). O script acha a grade, ordena os quadros do pacote no tempo e os encaixa
   nos do jogo. Quadros do pacote que destoam viram a média dos vizinhos, para não piscar.
+  A detecção também cobre quedas isoladas menores de correspondência, com um
+  limite robusto para preservar mudanças suaves. O caso do céu/fumaça da Room 001
+  e os testes estão em [smoke-animation-frame-outliers.md](smoke-animation-frame-outliers.md).
 - **Cores:** cada textura recebe um ajuste linear por canal para ficar com o tom da versão Xbox.
