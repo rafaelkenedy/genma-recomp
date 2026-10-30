@@ -9,10 +9,11 @@
 //                            indices use. A game may draw the same indices with other palettes (Genma's souls, red,
 //                            yellow and blue): each palette needs its own file, the others keep the game's texture
 // A DDS wins over a PNG for the same hash. The texture's coordinates are normalized, so any size fits. Files are read
-// at upload and not kept: a game uploads a texture again only when it changes.
+// on demand and retained in a bounded CPU cache; room files can prefetch them.
 // XBE_DUMP_TEXTURES=1 writes each texture once to textures_dump/<hash>.png (and .idx.png for P8) to find the names.
 #include <cstdint>
 #include <vector>
+#include <memory>
 
 #include "gpu/texture.h"
 
@@ -25,6 +26,11 @@ struct Replacement {
     std::vector<std::vector<uint8_t>> levels;  // level 0 first; Indexed: w * h indices, Bgra: w * h * 4, BCn: blocks
     bool Compressed() const { return kind != Kind::Bgra && kind != Kind::Indexed; }
     uint32_t BlockBytes() const { return kind == Kind::BC1 ? 8 : 16; }
+    size_t CacheBytes() const {
+        size_t bytes = 0;
+        for (const auto& level : levels) bytes += level.size();
+        return bytes;
+    }
 };
 
 // a P8 texture's palette as its level 0 uses it: FNV-1a 64 over, for each index present in order, the index byte and
@@ -34,8 +40,13 @@ uint64_t PaletteSignature(const uint8_t* indices, size_t count, const uint32_t* 
 // is there a replacement for this texture: palette_sig 0 for a texture without a palette, else PaletteSignature; a P8
 // texture takes its <hash>.p<sig> file, else its <hash>.idx.png. The folder is listed on the first call.
 bool HasReplacement(uint64_t hash, uint64_t palette_sig);
-// reads it, false when there is none or it cannot be read
-bool LoadReplacement(uint64_t hash, uint64_t palette_sig, Replacement& out);
+bool ReplacementUsesPalette(uint64_t hash, uint64_t palette_sig);
+// Immutable cached source, or null when it cannot be loaded.
+std::shared_ptr<const Replacement> LoadReplacement(uint64_t hash, uint64_t palette_sig);
+bool ReplacementCaching();
+// Call at device initialization and after each presentation. Speculative reads
+// wait for the current view to be presented before competing for I/O.
+void StartReplacementPrefetch(bool enabled);
 
 bool DumpTextures();  // XBE_DUMP_TEXTURES=1
 // level 0 decoded to textures_dump/<hash>.png; a P8 texture to <hash>.p<palette_sig>.png, once per palette, and its

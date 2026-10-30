@@ -16,5 +16,7 @@ Changes since that commit, in short:
   `assets/game_path.txt` in `runtime/app/game_files.cpp`
 - Release updates: startup check with confirmation, GitHub asset SHA-256 verification, staged installation,
   rollback/recovery and preserved player data (`launcher/update.cpp`, `launcher/update.ps1`)
+- HD texture streaming: bounded CPU/D3D12 caches and speculative BGS/XPR prefetch through optional file-open
+  notifications (`runtime/gpu/replace.cpp`, `runtime/core/resource_cache.h`, `runtime/gpu/xpr_index.h`)
 
 The port's notes in `../docs/` describe each change.

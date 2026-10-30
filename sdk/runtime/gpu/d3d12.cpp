@@ -35,6 +35,7 @@
 #include "core/log.h"
 #include "gpu/backend.h"
 #include "gpu/disk_cache.h"
+#include "core/resource_cache.h"
 #include "gpu/ext.h"
 #include "gpu/replace.h"
 #include "gpu/shaders.h"
@@ -98,6 +99,7 @@ struct Perf {
     uint64_t psos = 0;
     uint64_t shaders = 0;
     uint64_t shader_hits = 0;
+    uint64_t hd_hits = 0;
     uint64_t raw = 0;
     uint64_t lates = 0;
 };
@@ -123,7 +125,7 @@ struct FrameTrace {
                 return;
             }
             std::fprintf(file, "frame,time_ms,interval_ms,draw_ms,compile_ms,pipeline_ms,texture_ms,sync_ms,gpu_wait_"
-                               "ms,swap_ms,shaders,psos,tex_uploads,upload_mib,shader_cache_hits\n");
+                               "ms,swap_ms,shaders,psos,tex_uploads,upload_mib,shader_cache_hits,hd_gpu_cache_hits\n");
         }
     }
     void Record(double swap) {
@@ -131,14 +133,15 @@ struct FrameTrace {
             return;
         auto now = PerfClock::now();
         std::fprintf(
-            file, "%llu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%llu,%llu,%llu,%.6f,%llu\n",
+            file, "%llu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%llu,%llu,%llu,%.6f,%llu,%llu\n",
             (unsigned long long)++frames, std::chrono::duration<double, std::milli>(now - start).count(),
             std::chrono::duration<double, std::milli>(now - last).count(), g_perf.draw - previous.draw,
             g_perf.compile - previous.compile, g_perf.pipeline - previous.pipeline, g_perf.texup - previous.texup,
             g_perf.sync - previous.sync, g_perf.wait - previous.wait, swap,
             (unsigned long long)(g_perf.shaders - previous.shaders), (unsigned long long)(g_perf.psos - previous.psos),
             (unsigned long long)(g_perf.texups - previous.texups), double(g_perf.upload - previous.upload) / 1048576.0,
-            (unsigned long long)(g_perf.shader_hits - previous.shader_hits));
+            (unsigned long long)(g_perf.shader_hits - previous.shader_hits),
+            (unsigned long long)(g_perf.hd_hits - previous.hd_hits));
         last = now;
         if (frames % 60 == 0)
             std::fflush(file);
@@ -383,6 +386,22 @@ struct Tex {
     uint64_t palette = 0;  // hash of the colours a P8 texture was decoded with
     uint8_t flags = 0;  // Extension::Decoded's
     uint64_t replaced = 0;  // the content hash of the HD replacement res holds (replace.h), 0 for the game's own
+    bool immutable_hd = false;
+};
+
+struct HdKey {
+    uint64_t content, palette;
+    bool operator==(const HdKey&) const = default;
+};
+struct HdHash {
+    size_t operator()(const HdKey& key) const { return size_t(key.content ^ (key.palette * 0x9E3779B97F4A7C15ull)); }
+};
+struct HdTexture {
+    ComPtr<ID3D12Resource> res;
+    DXGI_FORMAT format;
+    uint32_t levels;
+    uint64_t bytes;
+    size_t CacheBytes() const { return size_t(bytes); }
 };
 
 struct PsoKey {
@@ -567,7 +586,8 @@ private:
     void UploadTexture(Tex& tx, const TextureDesc& d, const FormatInfo& fi, const uint8_t* p, const uint32_t* colours,
                        bool same);
     void UploadTextureLevel(Tex& tx, uint32_t f, uint32_t l, const std::vector<uint8_t>& px, uint32_t pitch);
-    bool UploadReplacement(Tex& tx, uint64_t content, Replacement& r, const uint32_t* colours);
+    bool UploadReplacement(Tex& tx, uint64_t content, uint64_t palette_sig, const uint32_t* colours);
+    bool UploadReplacementData(Tex& tx, uint64_t content, const Replacement& source, const uint32_t* colours);
     void EnsurePixelShader(const PixelKey& pk, DrawShaders& sh);
     void BuildPipelineKey(const State& s, const Assembled& a, uint64_t vh, uint64_t ph, PsoKey& k);
     void KeyDepthStencil(const State& s, const Assembled& a, PsoKey& k);
@@ -730,6 +750,7 @@ private:
     std::unordered_map<uint32_t, uint64_t> target_used_;  // target address to the frame it was last used
     std::unordered_map<uint32_t, Tex> cpu_depth_textures_;
     std::unordered_map<uint64_t, Tex> textures_;  // by data address, a P8 texture's with its palette's above
+    cache::Resources<HdKey, HdTexture, HdHash> hd_textures_{256ull << 20};
     std::unordered_map<uint64_t, ComPtr<ID3D12PipelineState>> blit_psos_;
     Extension* ext_ = nullptr;
     // one frame capture: every draw in a text file, each target as the frame leaves it, the textures it read
@@ -832,6 +853,7 @@ bool D3D12Backend::Init(uint32_t width, uint32_t height) {
     ImGui_ImplDX12_Init(dev_.Get(), kFrames, DXGI_FORMAT_B8G8R8A8_UNORM, ui_heap_.Get(),
                         ui_heap_->GetCPUDescriptorHandleForHeapStart(), ui_heap_->GetGPUDescriptorHandleForHeapStart());
     LoadSettings();
+    StartReplacementPrefetch(app::Get().hd_textures);
     Begin();
     LOGI("d3d12: %ux%u guest, %ux%u window, render scale %.3f", width, height, bb_w_, bb_h_, scale_);
     return true;
@@ -1898,8 +1920,47 @@ void D3D12Backend::UploadTexture(Tex& tx, const TextureDesc& d, const FormatInfo
 }
 
 // an HD replacement in place of the game's texture: its own size and levels, BGRA or the DDS's block format
-bool D3D12Backend::UploadReplacement(Tex& tx, uint64_t content, Replacement& r, const uint32_t* colours) {
-    PrepareLevels(r, colours);
+bool D3D12Backend::UploadReplacement(Tex& tx, uint64_t content, uint64_t palette_sig, const uint32_t* colours) {
+    if (!ReplacementCaching() || ReplacementUsesPalette(content, palette_sig)) {
+        auto source = LoadReplacement(content, palette_sig);
+        // Indexed images follow live palettes and stay mutable, as before.
+        // Detach any immutable cached image before writing this texture.
+        if (source && tx.immutable_hd) {
+            CurrentFrame().garbage.push_back(tx.res);
+            tx.res.Reset();
+            tx.immutable_hd = false;
+        }
+        return source && UploadReplacementData(tx, content, *source, colours);
+    }
+    auto load = [&]() -> std::shared_ptr<const HdTexture> {
+        auto source = LoadReplacement(content, palette_sig);
+        if (!source) return {};
+        Tex uploaded;
+        if (!UploadReplacementData(uploaded, content, *source, colours)) return {};
+        auto desc = uploaded.res->GetDesc();
+        auto info = dev_->GetResourceAllocationInfo(0, 1, &desc);
+        return std::make_shared<HdTexture>(HdTexture{uploaded.res, uploaded.fmt, uploaded.levels, info.SizeInBytes});
+    };
+    bool hit = false;
+    auto image = hd_textures_.Get({content, palette_sig}, load, &hit);
+    if (!image) return false;
+    if (hit) ++g_perf.hd_hits;
+    if (tx.res != image->res) {
+        if (tx.res) CurrentFrame().garbage.push_back(tx.res);
+        tx.res = image->res;
+    }
+    tx.fmt = image->format;
+    tx.levels = image->levels;
+    tx.replaced = content;
+    tx.immutable_hd = true;
+    return true;
+}
+
+bool D3D12Backend::UploadReplacementData(Tex& tx, uint64_t content, const Replacement& source, const uint32_t* colours) {
+    Replacement prepared;
+    // Cached source data is immutable. Palette expansion is local to this upload.
+    if (!source.Compressed()) { prepared = source; PrepareLevels(prepared, colours); }
+    const Replacement& r = source.Compressed() ? source : prepared;
     using K = Replacement::Kind;
     DXGI_FORMAT fmt = r.kind == K::BC1   ? DXGI_FORMAT_BC1_UNORM
                       : r.kind == K::BC2 ? DXGI_FORMAT_BC2_UNORM
@@ -1998,7 +2059,6 @@ ID3D12Resource* D3D12Backend::BindGuestTexture(const State& s, int stage, const 
             g_perf.texup_bytes += total;
             const uint32_t* colours = palette.va ? palette.colours : nullptr;
             // HD replacement by the content of level 0 as the game stores it (P8: the indices alone)
-            Replacement rep;
             bool have = false;
             uint64_t content = 0;
             bool replaceable = !d.linear && !d.cube && d.depth == 1;
@@ -2007,9 +2067,9 @@ ID3D12Resource* D3D12Backend::BindGuestTexture(const State& s, int stage, const 
                 // a P8 texture's file is per palette: the same indices may be drawn with several
                 uint64_t sig = d.format == 0x0B && colours ? PaletteSignature(p, LevelSize(d, 0), colours) : 0;
                 if (DumpTextures()) DumpTexture(content, sig, d, p, colours);
-                if (hd && HasReplacement(content, sig)) have = LoadReplacement(content, sig, rep);
+                if (hd && HasReplacement(content, sig)) have = UploadReplacement(tx, content, sig, colours);
             }
-            if (have && UploadReplacement(tx, content, rep, colours)) {
+            if (have) {
                 tx.sig = sig;
             } else {
                 if (tx.replaced) {
@@ -3502,6 +3562,7 @@ void D3D12Backend::Record(Target& t) {
 }
 
 void D3D12Backend::ApplySettings() {
+    StartReplacementPrefetch(app::Get().hd_textures);
     float want = app::RenderScale(guest_h_);
     bool remake = ext_ && ext_->Settings();
     if (std::fabs(want - scale_) > 1e-4f || remake) {

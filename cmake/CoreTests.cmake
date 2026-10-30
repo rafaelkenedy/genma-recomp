@@ -45,6 +45,10 @@ target_link_libraries(test_frame_clock PRIVATE Threads::Threads)
 genma_core_test(test_disk_cache tools/test_disk_cache.cpp)
 target_link_libraries(test_disk_cache PRIVATE Threads::Threads)
 
+genma_core_test(test_resource_cache tools/test_resource_cache.cpp)
+target_link_libraries(test_resource_cache PRIVATE Threads::Threads)
+genma_core_test(test_xpr_index tools/test_xpr_index.cpp)
+
 # Exercise the production hook with symbols derived from config alone, never an XBE.
 set(test_symbols ${CMAKE_CURRENT_BINARY_DIR}/core_test_symbols)
 add_custom_command(OUTPUT ${test_symbols}/image_symbols.h

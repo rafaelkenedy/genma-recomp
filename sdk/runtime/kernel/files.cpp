@@ -9,6 +9,7 @@
 #include "kernel/disc.h"
 #include "kernel/kernel.h"
 #include "kernel/exports.h"
+#include "core/file_observer.h"
 
 namespace fs = std::filesystem;
 
@@ -421,6 +422,7 @@ KERNEL_EXPORT(190, NtCreateFile, 9) {
     W32(handle_out, NewHandle(f));
     IoStatus(iosb, kSuccess, info);
     LOG_FIRST(400, "open %s", name.c_str());
+    if (mode[0] == 'r') assets::Opened(f->host);
     return kSuccess;
 }
 
@@ -450,6 +452,7 @@ KERNEL_EXPORT(202, NtOpenFile, 6) {
     (void)options;
     W32(handle_out, NewHandle(f));
     IoStatus(iosb, kSuccess, 1);
+    if (!f->dir) assets::Opened(f->host);
     return kSuccess;
 }
 

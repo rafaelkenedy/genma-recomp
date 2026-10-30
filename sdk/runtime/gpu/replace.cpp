@@ -18,10 +18,18 @@
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
+#include <condition_variable>
+#include <deque>
+#include <fstream>
+#include <thread>
 
 #include "app/app.h"
 #include "core/log.h"
 #include "gpu/replace.h"
+#include "gpu/shaders.h"
+#include "gpu/xpr_index.h"
+#include "core/resource_cache.h"
+#include "core/file_observer.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -34,7 +42,7 @@ namespace fs = std::filesystem;
 std::mutex g_lock;
 
 IWICImagingFactory* Wic() {
-    static ComPtr<IWICImagingFactory> wic = [] {
+    static thread_local ComPtr<IWICImagingFactory> wic = [] {
         CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         ComPtr<IWICImagingFactory> f;
         CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f));
@@ -310,16 +318,197 @@ bool HasReplacement(uint64_t hash, uint64_t palette_sig) {
     return Pick(hash, palette_sig, file);
 }
 
-bool LoadReplacement(uint64_t hash, uint64_t palette_sig, Replacement& out) {
+bool ReplacementUsesPalette(uint64_t hash, uint64_t palette_sig) {
     Pack::File file;
-    if (!Pick(hash, palette_sig, file)) return false;
-    bool ok = file.kind == Replacement::Kind::BC1 ? ReadDds(file.path, out)
-                                                    : ReadPng(file.path, file.kind == Replacement::Kind::Indexed, out);
-    if (!ok) return false;
-    static const char* kKinds[] = {"BGRA", "indexed", "BC1", "BC2", "BC3", "BC7"};
-    LOGI("textures: %016llX from %s, %ux%u %s, %zu levels", (unsigned long long)hash,
-         file.path.filename().string().c_str(), out.w, out.h, kKinds[int(out.kind)], out.levels.size());
-    return true;
+    return Pick(hash, palette_sig, file) && file.kind == Replacement::Kind::Indexed;
+}
+
+namespace {
+cache::Resources<fs::path, Replacement>& Replacements() {
+    static cache::Resources<fs::path, Replacement> cache(512ull << 20);
+    return cache;
+}
+
+std::shared_ptr<const Replacement> ReadReplacement(const Pack::File& file) {
+    auto read = [&]() -> std::shared_ptr<const Replacement> {
+        auto out = std::make_shared<Replacement>();
+        bool ok = file.kind == Replacement::Kind::BC1
+                      ? ReadDds(file.path, *out)
+                      : ReadPng(file.path, file.kind == Replacement::Kind::Indexed, *out);
+        if (!ok)
+            return {};
+        static const char* kKinds[] = {"BGRA", "indexed", "BC1", "BC2", "BC3", "BC7"};
+        LOGI("textures: read %s, %ux%u %s, %zu levels", file.path.filename().string().c_str(), out->w, out->h,
+             kKinds[int(out->kind)], out->levels.size());
+        return out;
+    };
+    return ReplacementCaching() ? Replacements().Get(file.path, read) : read();
+}
+
+std::atomic<bool> g_prefetch_enabled{false};
+class Prefetch {
+    struct Job {
+        fs::path path, key;
+        uint64_t generation, after_frame;
+    };
+    std::mutex mutex_;
+    std::condition_variable work_;
+    std::deque<Job> queue_;
+    std::unordered_set<fs::path> pending_;
+    bool stop_ = false;
+    fs::path room_;
+    uint64_t generation_ = 0;
+    uint64_t frame_ = 0;
+    std::thread thread_;
+    void Run() {
+        std::unordered_map<fs::path, std::vector<uint64_t>> index;
+        for (;;) {
+            fs::path path;
+            fs::path key;
+            uint64_t generation;
+            {
+                std::unique_lock lock(mutex_);
+                work_.wait(lock, [&] { return stop_ || (!queue_.empty() && queue_.front().after_frame <= frame_); });
+                if (stop_)
+                    return;
+                path = queue_.front().path;
+                key = queue_.front().key;
+                generation = queue_.front().generation;
+                queue_.pop_front();
+            }
+            if (!g_prefetch_enabled.load()) {
+                std::lock_guard lock(mutex_);
+                if (generation == generation_)
+                    pending_.erase(key);
+                continue;
+            }
+            try {
+                auto found = index.find(key);
+                if (found == index.end()) {
+                    // Original room containers are small. Never read an unbounded file.
+                    std::error_code error;
+                    auto bytes = fs::file_size(path, error);
+                    if (!error && bytes >= 12 && bytes <= (64ull << 20)) {
+                        std::vector<uint8_t> data(size_t(bytes), uint8_t{});
+                        std::ifstream file(path, std::ios::binary);
+                        if (file.read(reinterpret_cast<char*>(data.data()), data.size())) {
+                            std::vector<uint64_t> hashes;
+                            for (const auto& level : IndexXpr(data))
+                                hashes.push_back(Hash(data.data() + level.offset, level.bytes));
+                            // Bound metadata too; re-indexing an old file remains safe.
+                            if (index.size() >= 128)
+                                index.clear();
+                            found = index.emplace(key, std::move(hashes)).first;
+                        }
+                    }
+                }
+                size_t loaded = 0;
+                if (found != index.end())
+                    for (uint64_t hash : found->second) {
+                        {
+                            std::lock_guard lock(mutex_);
+                            if (stop_)
+                                return;
+                            if (generation != generation_)
+                                break;
+                        }
+                        if (!g_prefetch_enabled.load())
+                            break;
+                        Pack::File file;
+                        if (Pick(hash, 0, file) && ReadReplacement(file))
+                            ++loaded;
+                    }
+                auto stats = Replacements().Snapshot();
+                LOGI("textures: prefetched %zu from %s | CPU cache %.1f MiB, %zu hits, %zu misses, %zu evictions",
+                     loaded, path.filename().string().c_str(), stats.bytes / 1048576.0, stats.hits, stats.misses,
+                     stats.evictions);
+            } catch (const std::exception& e) {
+                LOGW("textures: prefetch skipped: %s", e.what());
+            }
+            {
+                std::lock_guard lock(mutex_);
+                if (generation == generation_)
+                    pending_.erase(key);
+            }
+        }
+    }
+
+  public:
+    Prefetch() : thread_([this] { Run(); }) {}
+    ~Prefetch() {
+        {
+            std::lock_guard lock(mutex_);
+            stop_ = true;
+        }
+        work_.notify_all();
+        thread_.join();
+    }
+    void Frame() {
+        {
+            std::lock_guard lock(mutex_);
+            ++frame_;
+        }
+        work_.notify_one();
+    }
+    void Queue(const fs::path& path) {
+        if (!g_prefetch_enabled.load())
+            return;
+        auto extension = path.extension().wstring();
+        std::transform(extension.begin(), extension.end(), extension.begin(),
+                       [](wchar_t c) { return std::towlower(c); });
+        if (extension != L".bgs" && extension != L".xpr")
+            return;
+        auto directory = path.parent_path().filename().wstring();
+        std::transform(directory.begin(), directory.end(), directory.begin(),
+                       [](wchar_t c) { return std::towlower(c); });
+        if (directory != L"bgs")
+            return;
+        auto normalized = path.lexically_normal().wstring();
+        std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                       [](wchar_t c) { return std::towlower(c); });
+        fs::path key(normalized);
+        std::lock_guard lock(mutex_);
+        if (extension == L".bgs" && key.filename() != room_) {
+            room_ = key.filename(); // D: and the game's Z: copy identify the same room
+            ++generation_;
+            queue_.clear();
+            pending_.clear(); // obsolete room jobs stop between individual reads
+        }
+        if (queue_.size() >= 16 || !pending_.insert(key).second)
+            return;
+        // Let the current view reach presentation before speculative reads
+        // compete with its load. The renderer can be one frame behind the title.
+        queue_.push_back({path, key, generation_, frame_ + 2});
+        work_.notify_one();
+    }
+};
+Prefetch& Backgrounds() {
+    static Prefetch prefetch;
+    return prefetch;
+}
+} // namespace
+
+std::shared_ptr<const Replacement> LoadReplacement(uint64_t hash, uint64_t palette_sig) {
+    Pack::File file;
+    return Pick(hash, palette_sig, file) ? ReadReplacement(file) : nullptr;
+}
+
+bool ReplacementCaching() {
+    static bool enabled = [] {
+        const char* value = std::getenv("XBE_TEXTURE_CACHE");
+        return !value || std::strcmp(value, "0");
+    }();
+    return enabled;
+}
+
+void StartReplacementPrefetch(bool enabled) {
+    g_prefetch_enabled.store(enabled && ReplacementCaching());
+    if (!g_prefetch_enabled.load())
+        return;
+    // Initialize before the worker so cache destruction follows worker shutdown.
+    (void)Replacements();
+    Backgrounds().Frame();
+    assets::on_open.store([](const fs::path& path) { Backgrounds().Queue(path); });
 }
 
 bool DumpTextures() {
@@ -330,15 +519,18 @@ bool DumpTextures() {
     return on;
 }
 
-void DumpTexture(uint64_t hash, uint64_t palette_sig, const TextureDesc& d, const uint8_t* guest, const uint32_t* palette) {
+void DumpTexture(uint64_t hash, uint64_t palette_sig, const TextureDesc& d, const uint8_t* guest,
+                 const uint32_t* palette) {
     static std::unordered_set<uint64_t> done, done_idx;
     bool indices_done;
     {
         std::lock_guard lock(g_lock);
-        if (!done.insert(hash ^ (palette_sig * 0x9E3779B97F4A7C15ull)).second) return;
+        if (!done.insert(hash ^ (palette_sig * 0x9E3779B97F4A7C15ull)).second)
+            return;
         indices_done = !done_idx.insert(hash).second;
     }
-    if (d.cube || d.depth > 1) return;
+    if (d.cube || d.depth > 1)
+        return;
     std::error_code ec;
     fs::path dir = app::ExeDir() / "textures_dump";
     fs::create_directories(dir, ec);

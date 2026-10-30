@@ -66,6 +66,12 @@ CSV time starts at the first backend presentation, whereas autopilot input is
 scheduled from process launch. These are overlapping samples of the same save
 and input sequence, not frame-by-frame deterministic replays.
 
+Later investigation found that the extra interaction command after loading
+could leave a dialogue open and block the movement commands in these early
+runs. They establish presentation cadence and loading behavior, not verified
+camera traversal. The subsequent texture-cache tests omit that command and
+record positions and camera IDs, confirming cuts between cameras 4, 3 and 5.
+
 These intervals measure CPU-side completion of backend presentation, not
 displayed frames from PresentMon. The later updated sample still had two
 intervals above 33.334 ms (maximum 47.23 ms). The loading peak still included
