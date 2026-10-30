@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+from urllib.parse import urlencode
 
 
 def sha(path):
@@ -36,8 +37,11 @@ def verify(directory, tag, commit):
     return result
 
 
-def gh(*args, missing_ok=False):
-    result = subprocess.run(['gh', *args], capture_output=True, text=True)
+def gh(*args, missing_ok=False, payload=None):
+    if payload is not None:
+        args = (*args, '--input', '-')
+    result = subprocess.run(['gh', *args], capture_output=True, text=True,
+                            input=json.dumps(payload) if payload is not None else None)
     if result.returncode:
         if missing_ok and 'HTTP 404' in result.stderr:
             return None
@@ -56,10 +60,22 @@ def prepare_files(directory, tag, commit):
 
 
 def find_release(repository, tag):
-    # The tag endpoint omits drafts. List releases (including authenticated
-    # drafts) and let gh handle pagination before selecting the exact tag.
-    return gh('api', f'repos/{repository}/releases?per_page=100', '--paginate',
-              '--jq', '.[] | select(.tag_name == ' + json.dumps(tag) + ')') or None
+    # Actions tokens can create drafts that REST tag/list lookups omit.
+    # Resolve the pending tag with GraphQL, as gh release does, then use its ID.
+    owner, name = repository.split('/')
+    result = gh('api', 'graphql', '-f', 'query=' + '''
+        query($owner: String!, $name: String!, $tag: String!) {
+          repository(owner: $owner, name: $name) {
+            release(tagName: $tag) { databaseId }
+          }
+        }''', '-f', 'owner=' + owner, '-f', 'name=' + name, '-f', 'tag=' + tag)
+    if result.get('errors'):
+        raise RuntimeError('GraphQL release lookup failed')
+    repo = result['data']['repository']
+    if repo is None:
+        raise ValueError('Repository unavailable during release lookup')
+    release = repo['release']
+    return gh('api', f'repos/{repository}/releases/{release["databaseId"]}') if release else None
 
 
 def publish(directory, tag, commit, repository):
@@ -68,11 +84,13 @@ def publish(directory, tag, commit, repository):
     files = prepare_files(directory, tag, commit)
     release = find_release(repository, tag)
     if release is None:
-        gh('release', 'create', tag, '--repo', repository, '--target', commit, '--title', tag,
-           '--generate-notes', '--notes', 'Windows x86-64 and experimental native Linux x86-64. Linux updates are manual; see the included README.', '--draft')
-        release = find_release(repository, tag)
-    if release is None:
-        raise ValueError('Created release was not found in the authenticated release list')
+        notes = gh('api', f'repos/{repository}/releases/generate-notes', '--method', 'POST',
+                   payload=dict(tag_name=tag, target_commitish=commit))
+        release = gh('api', f'repos/{repository}/releases', '--method', 'POST', payload=dict(
+            tag_name=tag, target_commitish=commit, name=tag, draft=True,
+            body='Windows x86-64 and experimental native Linux x86-64. Linux updates are manual; see the included README.\n\n' + notes['body']))
+    if release.get('tag_name') != tag:
+        raise ValueError('Release tag differs from requested tag')
     endpoint = f'repos/{repository}/releases/{release["id"]}'
     existing = {asset['name']: asset for asset in release.get('assets', [])}
     pending = []
@@ -85,8 +103,10 @@ def publish(directory, tag, commit, repository):
             raise ValueError('Published release is incomplete; refusing an implicit repair: ' + path.name)
         else:
             pending.append(path)
-    if pending:
-        gh('release', 'upload', tag, *(str(p) for p in pending), '--repo', repository)
+    for path in pending:
+        url = f'https://uploads.github.com/{endpoint}/assets?' + urlencode(dict(name=path.name))
+        gh('api', url, '--method', 'POST', '--header', 'Content-Type: application/octet-stream',
+           '--input', str(path))
     # Do not expose a half-uploaded release to the Windows updater.
     uploaded = gh('api', endpoint)
     assets = {asset['name']: asset for asset in uploaded.get('assets', [])}
@@ -95,7 +115,9 @@ def publish(directory, tag, commit, repository):
         if asset.get('size') != path.stat().st_size or asset.get('digest') != 'sha256:' + sha(path):
             raise ValueError('Uploaded asset verification failed: ' + path.name)
     if uploaded.get('draft'):
-        gh('release', 'edit', tag, '--repo', repository, '--draft=false')
+        uploaded = gh('api', endpoint, '--method', 'PATCH', payload=dict(draft=False))
+        if uploaded.get('draft'):
+            raise ValueError('Release remained a draft after publication')
     print('Verified release:', tag)
 
 
