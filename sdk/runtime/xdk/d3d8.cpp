@@ -616,7 +616,10 @@ static uint32_t Swap(X86Context& ctx) {
         }
     }
     Walk(Dev(kDevPush));  // reports asked for at the end of the frame
-    if (g_backend) g_backend->Present(SurfaceOf(g_buffers[1]));
+    if (g_backend) {
+        g_backend->SetStreamingFrame(assets::StreamingSnapshot());
+        g_backend->Present(SurfaceOf(g_buffers[1]));
+    }
     // The guest already waited for the next 60 Hz edge. A second independent
     // 60 Hz limiter would drift against it; lower user caps still apply.
     app::Pace(std::exchange(g_waited_for_vblank, false));

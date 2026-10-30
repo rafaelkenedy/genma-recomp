@@ -10,6 +10,7 @@
 #include "kernel/kernel.h"
 #include "kernel/exports.h"
 #include "core/file_observer.h"
+#include "core/streaming.h"
 
 namespace fs = std::filesystem;
 
@@ -478,6 +479,7 @@ static uint32_t Transfer(const Args& a, bool write, uint32_t pages) {
     if (write && f->entry) return kAccessDenied;
     ResetEvent(*f);
     std::lock_guard<std::mutex> lock(f->io);
+    const auto read_start = std::chrono::steady_clock::now();
     uint64_t pos = Offset(*f, off);
     if (f->fp) Seek(f->fp, pos);
     uint32_t n = 0;
@@ -491,6 +493,11 @@ static uint32_t Transfer(const Args& a, bool write, uint32_t pages) {
         if (done < chunk) break;
     }
     f->pos = pos + n;
+    if (!write) {
+        assets::read_ns.fetch_add(uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - read_start).count()), std::memory_order_relaxed);
+        assets::read_bytes.fetch_add(n, std::memory_order_relaxed);
+    }
     if (write && n < len) return Finish(*f, 0xC000007F, n, event, apc, apc_ctx, iosb);  // disk full
     if (!write && len && !n) return Finish(*f, kEndOfFile, 0, event, apc, apc_ctx, iosb);
     return Finish(*f, kSuccess, n, event, apc, apc_ctx, iosb);

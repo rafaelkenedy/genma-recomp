@@ -82,6 +82,7 @@ struct Perf {
     double wait = 0;
     double swap = 0;
     double sync = 0;
+    double hd_source = 0, hd_prepare = 0, hd_resource = 0, hd_copy = 0;
     // counts and bytes
     uint64_t draws = 0;
     uint64_t verts = 0;
@@ -117,6 +118,7 @@ struct FrameTrace {
     Perf previous{};
     PerfClock::time_point start = PerfClock::now(), last = start;
     uint64_t frames = 0;
+    assets::StreamingFrame previous_streaming;
     FrameTrace() {
         if (const wchar_t *path = _wgetenv(L"XBE_FRAME_TRACE"); path && *path) {
             file = _wfopen(path, L"wb");
@@ -125,15 +127,16 @@ struct FrameTrace {
                 return;
             }
             std::fprintf(file, "frame,time_ms,interval_ms,draw_ms,compile_ms,pipeline_ms,texture_ms,sync_ms,gpu_wait_"
-                               "ms,swap_ms,shaders,psos,tex_uploads,upload_mib,shader_cache_hits,hd_gpu_cache_hits\n");
+                               "ms,swap_ms,shaders,psos,tex_uploads,upload_mib,shader_cache_hits,hd_gpu_cache_hits,"
+                               "stage,room,camera,guest_read_ms,guest_read_mib,hd_source_ms,hd_prepare_ms,hd_resource_ms,hd_copy_ms\n");
         }
     }
-    void Record(double swap) {
+    void Record(double swap, const assets::StreamingFrame& streaming) {
         if (!file)
             return;
         auto now = PerfClock::now();
         std::fprintf(
-            file, "%llu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%llu,%llu,%llu,%.6f,%llu,%llu\n",
+            file, "%llu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%llu,%llu,%llu,%.6f,%llu,%llu",
             (unsigned long long)++frames, std::chrono::duration<double, std::milli>(now - start).count(),
             std::chrono::duration<double, std::milli>(now - last).count(), g_perf.draw - previous.draw,
             g_perf.compile - previous.compile, g_perf.pipeline - previous.pipeline, g_perf.texup - previous.texup,
@@ -142,6 +145,16 @@ struct FrameTrace {
             (unsigned long long)(g_perf.texups - previous.texups), double(g_perf.upload - previous.upload) / 1048576.0,
             (unsigned long long)(g_perf.shader_hits - previous.shader_hits),
             (unsigned long long)(g_perf.hd_hits - previous.hd_hits));
+        const bool known = streaming.camera != ~uint64_t{0};
+        std::fprintf(file, ",%d,%d,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+            known ? int((streaming.camera >> 32) & 0xffff) : -1,
+            known ? int((streaming.camera >> 16) & 0xffff) : -1,
+            known ? int(streaming.camera & 0xffff) : -1,
+            double(streaming.read_ns - previous_streaming.read_ns) / 1e6,
+            double(streaming.read_bytes - previous_streaming.read_bytes) / 1048576.0,
+            g_perf.hd_source - previous.hd_source, g_perf.hd_prepare - previous.hd_prepare,
+            g_perf.hd_resource - previous.hd_resource, g_perf.hd_copy - previous.hd_copy);
+        previous_streaming = streaming;
         last = now;
         if (frames % 60 == 0)
             std::fflush(file);
@@ -1921,8 +1934,12 @@ void D3D12Backend::UploadTexture(Tex& tx, const TextureDesc& d, const FormatInfo
 
 // an HD replacement in place of the game's texture: its own size and levels, BGRA or the DDS's block format
 bool D3D12Backend::UploadReplacement(Tex& tx, uint64_t content, uint64_t palette_sig, const uint32_t* colours) {
+    const auto acquire = [&] {
+        PerfScope timing{g_perf.hd_source};
+        return LoadReplacement(content, palette_sig);
+    };
     if (!ReplacementCaching() || ReplacementUsesPalette(content, palette_sig)) {
-        auto source = LoadReplacement(content, palette_sig);
+        auto source = acquire();
         // Indexed images follow live palettes and stay mutable, as before.
         // Detach any immutable cached image before writing this texture.
         if (source && tx.immutable_hd) {
@@ -1933,7 +1950,7 @@ bool D3D12Backend::UploadReplacement(Tex& tx, uint64_t content, uint64_t palette
         return source && UploadReplacementData(tx, content, *source, colours);
     }
     auto load = [&]() -> std::shared_ptr<const HdTexture> {
-        auto source = LoadReplacement(content, palette_sig);
+        auto source = acquire();
         if (!source) return {};
         Tex uploaded;
         if (!UploadReplacementData(uploaded, content, *source, colours)) return {};
@@ -1959,7 +1976,11 @@ bool D3D12Backend::UploadReplacement(Tex& tx, uint64_t content, uint64_t palette
 bool D3D12Backend::UploadReplacementData(Tex& tx, uint64_t content, const Replacement& source, const uint32_t* colours) {
     Replacement prepared;
     // Cached source data is immutable. Palette expansion is local to this upload.
-    if (!source.Compressed()) { prepared = source; PrepareLevels(prepared, colours); }
+    if (!source.Compressed()) {
+        PerfScope timing{g_perf.hd_prepare};
+        prepared = source;
+        PrepareLevels(prepared, colours);
+    }
     const Replacement& r = source.Compressed() ? source : prepared;
     using K = Replacement::Kind;
     DXGI_FORMAT fmt = r.kind == K::BC1   ? DXGI_FORMAT_BC1_UNORM
@@ -1971,6 +1992,7 @@ bool D3D12Backend::UploadReplacementData(Tex& tx, uint64_t content, const Replac
     if (r.Compressed() && ((r.w & 3) || (r.h & 3))) return false;
     bool fresh = tx.replaced != content || !tx.res || tx.fmt != fmt || tx.levels != r.levels.size();
     if (fresh) {
+        PerfScope timing{g_perf.hd_resource};
         if (tx.res) CurrentFrame().garbage.push_back(tx.res);
         tx.res.Reset();
         D3D12_HEAP_PROPERTIES hp{D3D12_HEAP_TYPE_DEFAULT};
@@ -1986,11 +2008,14 @@ bool D3D12Backend::UploadReplacementData(Tex& tx, uint64_t content, const Replac
         D3D12_RESOURCE_STATES cur = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
         Transition(tx.res.Get(), cur, D3D12_RESOURCE_STATE_COPY_DEST);
     }
-    uint32_t w = r.w;
-    for (uint32_t l = 0; l < tx.levels; l++) {
-        uint32_t pitch = r.Compressed() ? ((w + 3) / 4) * r.BlockBytes() : w * 4;
-        UploadTextureLevel(tx, 0, l, r.levels[l], pitch);
-        w = std::max(w / 2, 1u);
+    {
+        PerfScope timing{g_perf.hd_copy};
+        uint32_t w = r.w;
+        for (uint32_t l = 0; l < tx.levels; l++) {
+            uint32_t pitch = r.Compressed() ? ((w + 3) / 4) * r.BlockBytes() : w * 4;
+            UploadTextureLevel(tx, 0, l, r.levels[l], pitch);
+            w = std::max(w / 2, 1u);
+        }
     }
     D3D12_RESOURCE_STATES st = D3D12_RESOURCE_STATE_COPY_DEST;
     Transition(tx.res.Get(), st, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
@@ -3468,7 +3493,7 @@ void D3D12Backend::Present(const Surface& front) {
     ResetFrame();
     CountFps();
     static FrameTrace trace;
-    trace.Record(swap_ms);
+    trace.Record(swap_ms, streaming_frame_);
     if (diag::Perf()) LogPerf();
     trace.previous = g_perf;
     ApplySettings();

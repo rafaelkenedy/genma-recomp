@@ -55,8 +55,15 @@ add_custom_command(OUTPUT ${test_symbols}/image_symbols.h
     COMMAND $<TARGET_FILE:xbe_recomp> config/game.toml --symbols-only ${test_symbols} --xdk ${SDK}/xdk
     DEPENDS xbe_recomp ${CMAKE_CURRENT_SOURCE_DIR}/config/game.toml
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} VERBATIM)
-genma_core_test(test_modern_controls_hook tools/test_modern_controls_hook.cpp ${test_symbols}/image_symbols.h)
+add_custom_target(genma_core_test_symbols DEPENDS ${test_symbols}/image_symbols.h)
+
+genma_core_test(test_modern_controls_hook tools/test_modern_controls_hook.cpp)
+add_dependencies(test_modern_controls_hook genma_core_test_symbols)
 target_include_directories(test_modern_controls_hook PRIVATE ${test_symbols})
+
+genma_core_test(test_background_streaming_hook tools/test_background_streaming_hook.cpp)
+add_dependencies(test_background_streaming_hook genma_core_test_symbols)
+target_include_directories(test_background_streaming_hook PRIVATE ${test_symbols})
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     genma_core_test(test_linux_fiber tools/test_linux_fiber.cpp ${SDK}/runtime/core/log.cpp)

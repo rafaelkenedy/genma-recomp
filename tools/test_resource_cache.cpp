@@ -38,6 +38,23 @@ int main() {
     }
     assert(cache.Get(6, [&] { return load(6); }));
 
+    cache::Resources<int, Resource> protected_cache(8);
+    auto current = protected_cache.Get(1, [&] { return load(1); });
+    protected_cache.Protect({1});
+    protected_cache.Get(2, [&] { return load(2); });
+    protected_cache.Get(3, [&] { return load(3); }); // evict 2 despite 1 being older
+    assert(protected_cache.Get(1, [&] { assert(false); return load(1); }) == current);
+    protected_cache.Protect({1, 3});
+    protected_cache.Get(4, [&] { return load(4); });
+    assert(protected_cache.Snapshot().bytes == 8); // fully protected cache cannot grow
+    bool hit = true;
+    protected_cache.Get(4, [&] { return load(4); }, &hit);
+    assert(!hit); // transient speculative value was not retained
+    protected_cache.Protect({});
+    protected_cache.Get(4, [&] { return load(4); });
+    protected_cache.Get(4, [&] { assert(false); return load(4); }, &hit);
+    assert(hit && protected_cache.Snapshot().bytes == 8);
+
     cache::Resources<int, Resource> concurrent(16);
     std::promise<void> entered, release;
     auto released = release.get_future().share();

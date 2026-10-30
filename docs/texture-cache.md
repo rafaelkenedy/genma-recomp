@@ -29,6 +29,14 @@ Implementação de 30/10/2026, a partir da investigação em
   carga inicial nos testes. D: e sua cópia Z: com o mesmo nome de sala não
   cancelam uma à outra. Uma sala diferente cancela trabalho obsoleto entre
   leituras individuais; filas e índices também têm limites.
+- A seleção nativa por câmera agora prioriza as faixas BGS do fundo atual e
+  dos destinos associados, incluindo aliases por progresso do jogo e vizinhos
+  já residentes. Pedidos antigos são cancelados entre leituras. Sem seleção
+  válida, permanece a pré-carga ampla; animações XPR mantêm seu próprio caminho.
+- As imagens CPU do fundo atual recebem proteção contra evicção especulativa,
+  respeitando os mesmos 512 MiB. Se não houver espaço sem remover uma imagem
+  protegida, a nova imagem é entregue sem retenção. Não há leases permanentes
+  adicionais. Detalhes em [native-camera-streaming.md](native-camera-streaming.md).
 
 Esta versão implementa cache e pré-carga, **não upload parcelado**. Misses de
 CPU/GPU ainda podem executar leitura e upload síncronos. O prefetch por arquivo

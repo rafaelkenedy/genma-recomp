@@ -26,6 +26,7 @@
 #include "app/app.h"
 #include "core/log.h"
 #include "gpu/replace.h"
+#include "core/streaming.h"
 #include "gpu/shaders.h"
 #include "gpu/xpr_index.h"
 #include "core/resource_cache.h"
@@ -350,6 +351,8 @@ class Prefetch {
     struct Job {
         fs::path path, key;
         uint64_t generation, after_frame;
+        uint64_t selection = ~uint64_t{0};
+        assets::BackgroundHint hint;
     };
     std::mutex mutex_;
     std::condition_variable work_;
@@ -359,13 +362,21 @@ class Prefetch {
     fs::path room_;
     uint64_t generation_ = 0;
     uint64_t frame_ = 0;
+    uint64_t selection_ = 0;
+    fs::path bgs_path_, bgs_key_, hint_room_;
+    assets::BackgroundHint hint_;
     std::thread thread_;
     void Run() {
-        std::unordered_map<fs::path, std::vector<uint64_t>> index;
+        struct Image {
+            uint64_t hash;
+            size_t offset, bytes;
+        };
+        std::unordered_map<fs::path, std::vector<Image>> index;
         for (;;) {
             fs::path path;
             fs::path key;
             uint64_t generation;
+            Job job;
             {
                 std::unique_lock lock(mutex_);
                 work_.wait(lock, [&] { return stop_ || (!queue_.empty() && queue_.front().after_frame <= frame_); });
@@ -374,6 +385,7 @@ class Prefetch {
                 path = queue_.front().path;
                 key = queue_.front().key;
                 generation = queue_.front().generation;
+                job = queue_.front();
                 queue_.pop_front();
             }
             if (!g_prefetch_enabled.load()) {
@@ -392,9 +404,10 @@ class Prefetch {
                         std::vector<uint8_t> data(size_t(bytes), uint8_t{});
                         std::ifstream file(path, std::ios::binary);
                         if (file.read(reinterpret_cast<char*>(data.data()), data.size())) {
-                            std::vector<uint64_t> hashes;
+                            std::vector<Image> hashes;
                             for (const auto& level : IndexXpr(data))
-                                hashes.push_back(Hash(data.data() + level.offset, level.bytes));
+                                hashes.push_back(
+                                    {Hash(data.data() + level.offset, level.bytes), level.offset, level.bytes});
                             // Bound metadata too; re-indexing an old file remains safe.
                             if (index.size() >= 128)
                                 index.clear();
@@ -403,21 +416,42 @@ class Prefetch {
                     }
                 }
                 size_t loaded = 0;
-                if (found != index.end())
-                    for (uint64_t hash : found->second) {
-                        {
-                            std::lock_guard lock(mutex_);
-                            if (stop_)
-                                return;
-                            if (generation != generation_)
-                                break;
-                        }
-                        if (!g_prefetch_enabled.load())
+                std::vector<uint64_t> ordered;
+                std::vector<fs::path> protected_files;
+                if (found != index.end()) {
+                    const uint32_t passes = job.hint.count ? job.hint.count : 1;
+                    for (uint32_t i = 0; i < passes; ++i)
+                        for (const auto& image : found->second)
+                            if ((!job.hint.count || job.hint.ranges[i].Contains(image.offset, image.bytes)) &&
+                                std::find(ordered.begin(), ordered.end(), image.hash) == ordered.end()) {
+                                ordered.push_back(image.hash);
+                                Pack::File file;
+                                if (job.hint.count && i == 0 && Pick(image.hash, 0, file))
+                                    protected_files.push_back(file.path);
+                            }
+                }
+                // Protect only the current background, not every speculative
+                // neighbor. Protection changes eviction order, never the budget.
+                if (job.selection != ~uint64_t{0}) {
+                    std::lock_guard lock(mutex_);
+                    if (generation != generation_ || job.selection != selection_)
+                        continue;
+                    Replacements().Protect(protected_files);
+                }
+                for (uint64_t hash : ordered) {
+                    {
+                        std::lock_guard lock(mutex_);
+                        if (stop_)
+                            return;
+                        if (generation != generation_ || (job.selection != ~uint64_t{0} && job.selection != selection_))
                             break;
-                        Pack::File file;
-                        if (Pick(hash, 0, file) && ReadReplacement(file))
-                            ++loaded;
                     }
+                    if (!g_prefetch_enabled.load())
+                        break;
+                    Pack::File file;
+                    if (Pick(hash, 0, file) && ReadReplacement(file))
+                        ++loaded;
+                }
                 auto stats = Replacements().Snapshot();
                 LOGI("textures: prefetched %zu from %s | CPU cache %.1f MiB, %zu hits, %zu misses, %zu evictions",
                      loaded, path.filename().string().c_str(), stats.bytes / 1048576.0, stats.hits, stats.misses,
@@ -427,7 +461,7 @@ class Prefetch {
             }
             {
                 std::lock_guard lock(mutex_);
-                if (generation == generation_)
+                if (generation == generation_ && (job.selection == ~uint64_t{0} || job.selection == selection_))
                     pending_.erase(key);
             }
         }
@@ -474,12 +508,52 @@ class Prefetch {
             queue_.clear();
             pending_.clear(); // obsolete room jobs stop between individual reads
         }
+        if (extension == L".bgs") {
+            bgs_path_ = path;
+            bgs_key_ = key;
+        }
         if (queue_.size() >= 16 || !pending_.insert(key).second)
             return;
         // Let the current view reach presentation before speculative reads
         // compete with its load. The renderer can be one frame behind the title.
-        queue_.push_back({path, key, generation_, frame_ + 2});
+        Job job{path, key, generation_, frame_ + 2};
+        if (extension == L".bgs")
+            job.selection = selection_;
+        if (extension == L".bgs" && key.filename() == hint_room_ && hint_.count) {
+            job.selection = selection_;
+            job.hint = hint_;
+            queue_.push_front(job);
+        } else
+            queue_.push_back(job);
         work_.notify_one();
+    }
+    void Hint(const assets::BackgroundHint& hint) {
+        static const bool enabled = [] {
+            const char* value = std::getenv("XBE_CAMERA_PREFETCH");
+            return !value || std::strcmp(value, "0");
+        }();
+        if (!enabled)
+            return;
+        if (!g_prefetch_enabled.load() || hint.count > hint.ranges.size())
+            return;
+        char name[24];
+        std::snprintf(name, sizeof(name), "room%u%02u.bgs", hint.stage, hint.room);
+        std::lock_guard lock(mutex_);
+        if (hint == hint_ && hint_room_ == fs::path(name))
+            return;
+        hint_room_ = name;
+        hint_ = hint;
+        ++selection_;
+        if (bgs_key_.empty() || bgs_key_.filename() != hint_room_)
+            return;
+        // Supersede the broad room job, including one already indexing/reading.
+        // XPR jobs retain their own lifetime and continue to handle animations.
+        std::erase_if(queue_, [&](const Job& job) { return job.key == bgs_key_; });
+        pending_.insert(bgs_key_);
+        queue_.push_front({bgs_path_, bgs_key_, generation_, frame_ + 2, selection_, hint_});
+        work_.notify_one();
+        LOGI("textures: camera prefetch room=%u%02u camera=%u ranges=%u", hint.stage, hint.room, hint.camera,
+             hint.count);
     }
 };
 Prefetch& Backgrounds() {
@@ -509,6 +583,7 @@ void StartReplacementPrefetch(bool enabled) {
     (void)Replacements();
     Backgrounds().Frame();
     assets::on_open.store([](const fs::path& path) { Backgrounds().Queue(path); });
+    assets::on_background.store([](const assets::BackgroundHint& hint) { Backgrounds().Hint(hint); });
 }
 
 bool DumpTextures() {

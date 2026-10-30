@@ -4,6 +4,7 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace cache {
@@ -19,6 +20,7 @@ template <class Key, class Value, class Hash = std::hash<Key>> class Resources {
     std::mutex mutex_;
     std::unordered_map<Key, std::shared_ptr<Entry>, Hash> entries_;
     std::list<Key> lru_;
+    std::unordered_set<Key, Hash> protected_;
     size_t budget_;
 
   public:
@@ -75,16 +77,24 @@ template <class Key, class Value, class Hash = std::hash<Key>> class Resources {
                 entries_.erase(key);
             else {
                 while (!lru_.empty() && stats_.bytes > budget_ - bytes) {
-                    auto oldest = entries_.find(lru_.back());
+                    auto victim = lru_.end();
+                    while (victim != lru_.begin()) {
+                        --victim;
+                        if (!protected_.contains(*victim)) break;
+                    }
+                    if (protected_.contains(*victim)) break;
+                    auto oldest = entries_.find(*victim);
                     stats_.bytes -= oldest->second->value->CacheBytes();
                     retired.push_back(std::move(oldest->second));
                     entries_.erase(oldest);
-                    lru_.pop_back();
+                    lru_.erase(victim);
                     ++stats_.evictions;
                 }
-                lru_.push_front(key);
-                entry->position = lru_.begin();
-                stats_.bytes += bytes;
+                if (stats_.bytes <= budget_ - bytes) {
+                    lru_.push_front(key);
+                    entry->position = lru_.begin();
+                    stats_.bytes += bytes;
+                } else entries_.erase(key); // protect the current view without exceeding the byte budget
             }
         }
         entry->ready.notify_all();
@@ -93,6 +103,11 @@ template <class Key, class Value, class Hash = std::hash<Key>> class Resources {
     Stats Snapshot() {
         std::lock_guard lock(mutex_);
         return stats_;
+    }
+    void Protect(const std::vector<Key>& keys) {
+        std::lock_guard lock(mutex_);
+        protected_.clear();
+        protected_.insert(keys.begin(), keys.end());
     }
 };
 } // namespace cache
