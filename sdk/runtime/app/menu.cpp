@@ -131,6 +131,7 @@ void Pacing(Settings& s) {
     for (int i = 0; i < 7; i++)
         if (caps_v[i] == s.fps_cap) ci = i;
     if (ImGui::Combo("FPS cap", &ci, caps, 7)) s.fps_cap = caps_v[ci];
+    Help("Unlimited removes this limit. The game's own timing can still keep gameplay at 60 FPS.");
     ImGui::Checkbox("V-Sync", &s.vsync);
 }
 

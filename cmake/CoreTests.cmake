@@ -39,6 +39,12 @@ genma_core_test(test_cpu_abi tools/test_cpu_abi.cpp tools/test_cpu_abi_weak.cpp)
 genma_core_test(test_modern_controls tools/test_modern_controls.cpp)
 genma_core_test(test_audio_distance tools/test_audio_distance.cpp)
 
+genma_core_test(test_frame_clock tools/test_frame_clock.cpp)
+target_link_libraries(test_frame_clock PRIVATE Threads::Threads)
+
+genma_core_test(test_disk_cache tools/test_disk_cache.cpp)
+target_link_libraries(test_disk_cache PRIVATE Threads::Threads)
+
 # Exercise the production hook with symbols derived from config alone, never an XBE.
 set(test_symbols ${CMAKE_CURRENT_BINARY_DIR}/core_test_symbols)
 add_custom_command(OUTPUT ${test_symbols}/image_symbols.h

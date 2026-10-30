@@ -11,6 +11,7 @@
 
 #include "app/app.h"
 #include "core/diag.h"
+#include "core/frame_clock.h"
 #include "gpu/backend.h"
 #include "gpu/texture.h"
 #include "gpu/vertex.h"
@@ -261,17 +262,21 @@ constexpr bool kVBlank = XDK_CDevice_VBlankCount != xdk::kUnknown && XDK_CDevice
                          XDK_CDevice_VBlankCallback != xdk::kUnknown;
 
 // what the library's vertical blank interrupt leaves for the title: count, event, callback
+timing::VBlankSignal g_vblank;
+thread_local bool g_waited_for_vblank = false;
+
 void VerticalBlank(X86Context& ctx) {
     using clock = std::chrono::steady_clock;
     uint32_t info = mem::AllocSystem(12), shown = 0;
     auto next = clock::now();
     for (;;) {
-        next = std::max(next + std::chrono::microseconds(16667), clock::now());
-        std::this_thread::sleep_until(next);
+        next = std::max(next + timing::kVBlankPeriod, clock::now());
+        timing::WaitUntil(next);
         uint32_t count = Dev(XDK_CDevice_VBlankCount) + 1, swaps = Dev(kDevSwapCount);
         SetDev(XDK_CDevice_VBlankCount, count);
         ObjectRef event = FromPointer(kDevice + XDK_CDevice_VBlankEvent);
         SetEvent(*event);
+        g_vblank.Pulse();
         if (uint32_t callback = Dev(XDK_CDevice_VBlankCallback)) {
             // blank count, swaps shown, 1 when this blank showed one
             W32(info, count);
@@ -476,7 +481,12 @@ HLE_STDCALL(D3D_MakeRequestedSpace, 2) {
 }
 
 HLE_STDCALL(D3DDevice_BlockUntilVerticalBlank, 0) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    if constexpr (kVBlank) g_vblank.WaitNext();
+    else {
+        thread_local timing::FrameDeadline deadline;
+        timing::WaitUntil(deadline.Next(timing::Clock::now(), 60));
+    }
+    g_waited_for_vblank = true;
     return 0;
 }
 HLE_STDCALL(D3DDevice_SetFlickerFilter, 1) { return 0; }
@@ -607,7 +617,9 @@ static uint32_t Swap(X86Context& ctx) {
     }
     Walk(Dev(kDevPush));  // reports asked for at the end of the frame
     if (g_backend) g_backend->Present(SurfaceOf(g_buffers[1]));
-    app::Pace();
+    // The guest already waited for the next 60 Hz edge. A second independent
+    // 60 Hz limiter would drift against it; lower user caps still apply.
+    app::Pace(std::exchange(g_waited_for_vblank, false));
     // like the XDK, the surfaces stay put and their memory rotates: titles keep back buffer pointers and copy its data
     uint32_t last = g_buffers[g_buffer_count - 1], data = R32(last + 4), lk = R32(last + 8);
     for (uint32_t i = g_buffer_count - 1; i > 0; i--) {

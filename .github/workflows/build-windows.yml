@@ -83,6 +83,17 @@ jobs:
           & ./build/test_modern_controls_hook.exe
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
+      - name: Frame timing and disk cache regression tests
+        shell: pwsh
+        run: |
+          $cxx = "$env:GITHUB_WORKSPACE/llvm-mingw/bin/clang++.exe"
+          foreach ($test in @('test_frame_clock', 'test_disk_cache')) {
+            & $cxx -std=c++20 -static -UNDEBUG -Wall -Wextra -Isdk/runtime "tools/$test.cpp" -o "build/$test.exe"
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            & "./build/$test.exe"
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          }
+
       - name: Updater regression tests
         shell: pwsh
         run: |

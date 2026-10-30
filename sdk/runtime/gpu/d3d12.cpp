@@ -9,10 +9,12 @@
 #include <d3d12.h>
 #include <d3d12sdklayers.h>
 #include <d3dcompiler.h>
+#include <d3d12shader.h>
 #include <dxgi1_6.h>
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -32,6 +34,7 @@
 #include "core/diag.h"
 #include "core/log.h"
 #include "gpu/backend.h"
+#include "gpu/disk_cache.h"
 #include "gpu/ext.h"
 #include "gpu/replace.h"
 #include "gpu/shaders.h"
@@ -71,6 +74,7 @@ struct Perf {
     double sig = 0;
     double texup = 0;
     double compile = 0;
+    double pipeline = 0;
     double clear = 0;
     double copy = 0;
     double present = 0;
@@ -93,6 +97,7 @@ struct Perf {
     uint64_t syncs = 0;
     uint64_t psos = 0;
     uint64_t shaders = 0;
+    uint64_t shader_hits = 0;
     uint64_t raw = 0;
     uint64_t lates = 0;
 };
@@ -102,6 +107,49 @@ struct PerfScope {
     PerfClock::time_point t = PerfClock::now();
     ~PerfScope() { acc += PerfMs(t); }
 };
+
+// Opt-in per-frame evidence, separate from the one-second averages. Buffered
+// writes are flushed every 60 frames so a diagnostic stop keeps the last samples.
+struct FrameTrace {
+    FILE *file = nullptr;
+    Perf previous{};
+    PerfClock::time_point start = PerfClock::now(), last = start;
+    uint64_t frames = 0;
+    FrameTrace() {
+        if (const wchar_t *path = _wgetenv(L"XBE_FRAME_TRACE"); path && *path) {
+            file = _wfopen(path, L"wb");
+            if (!file) {
+                LOGE("frame trace: cannot open output");
+                return;
+            }
+            std::fprintf(file, "frame,time_ms,interval_ms,draw_ms,compile_ms,pipeline_ms,texture_ms,sync_ms,gpu_wait_"
+                               "ms,swap_ms,shaders,psos,tex_uploads,upload_mib,shader_cache_hits\n");
+        }
+    }
+    void Record(double swap) {
+        if (!file)
+            return;
+        auto now = PerfClock::now();
+        std::fprintf(
+            file, "%llu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%llu,%llu,%llu,%.6f,%llu\n",
+            (unsigned long long)++frames, std::chrono::duration<double, std::milli>(now - start).count(),
+            std::chrono::duration<double, std::milli>(now - last).count(), g_perf.draw - previous.draw,
+            g_perf.compile - previous.compile, g_perf.pipeline - previous.pipeline, g_perf.texup - previous.texup,
+            g_perf.sync - previous.sync, g_perf.wait - previous.wait, swap,
+            (unsigned long long)(g_perf.shaders - previous.shaders), (unsigned long long)(g_perf.psos - previous.psos),
+            (unsigned long long)(g_perf.texups - previous.texups), double(g_perf.upload - previous.upload) / 1048576.0,
+            (unsigned long long)(g_perf.shader_hits - previous.shader_hits));
+        last = now;
+        if (frames % 60 == 0)
+            std::fflush(file);
+    }
+};
+
+std::filesystem::path CacheFile(char kind, uint64_t key) {
+    char name[32];
+    std::snprintf(name, sizeof(name), "%c_%016llX.bin", kind, (unsigned long long)key);
+    return app::CacheDir() / "shader-cache-d3d12" / "v1" / name;
+}
 
 // F3 captures only with diag::CaptureDir set
 // shadow volume depth bias experiment (KeyDepthStencil): units and slope, set on the render thread only
@@ -524,6 +572,8 @@ private:
     void BuildPipelineKey(const State& s, const Assembled& a, uint64_t vh, uint64_t ph, PsoKey& k);
     void KeyDepthStencil(const State& s, const Assembled& a, PsoKey& k);
     ID3D12PipelineState* EnsurePipeline(const PsoKey& k, ID3DBlob* vs, ID3DBlob* ps);
+    ID3DBlob* CachedShader(uint64_t hash);
+    void WarmPipelines();
     void FillPipelineDesc(const PsoKey& k, ID3DBlob* vs, ID3DBlob* ps, D3D12_GRAPHICS_PIPELINE_STATE_DESC& d) const;
     void ExpandPoints(D3D12_GRAPHICS_PIPELINE_STATE_DESC& d);
     float TargetScale() const;  // host pixels per console pixel of the bound target
@@ -673,6 +723,7 @@ private:
     std::unordered_map<uint64_t, ComPtr<ID3DBlob>> blobs_;
     std::unordered_map<uint64_t, uint64_t> shader_src_;  // vertex and pixel program keys to source hash
     std::unordered_map<uint64_t, ComPtr<ID3D12PipelineState>> psos_;
+    bool warming_ = false;
     std::unordered_map<uint64_t, uint32_t> samplers_;
     uint32_t smp_used_ = 0;
     std::unordered_map<uint64_t, Target> targets_;
@@ -775,6 +826,7 @@ bool D3D12Backend::Init(uint32_t width, uint32_t height) {
     CreateHeaps();
     CreateBackBufferViews();
     if (!CreateRootSignature()) return false;
+    WarmPipelines();
     CreateFrames();
     CreateGammaLut();
     ImGui_ImplDX12_Init(dev_.Get(), kFrames, DXGI_FORMAT_B8G8R8A8_UNORM, ui_heap_.Get(),
@@ -1413,31 +1465,94 @@ void D3D12Backend::Blit(ID3D12Resource* src, DXGI_FORMAT fmt, const float uvrect
     DrawFullScreen(EnsureBlitPipeline(o.rtv, o.over), cb.gpu, slot, si);
 }
 
-ID3DBlob* D3D12Backend::Compile(const std::string& src, const char* entry, const char* profile, uint64_t& hash) {
+ID3DBlob* D3D12Backend::CachedShader(uint64_t hash) {
+    auto it = blobs_.find(hash);
+    if (it != blobs_.end())
+        return it->second.Get();
+    ComPtr<ID3DBlob> code;
+    std::vector<uint8_t> cached;
+    if (disk_cache::Read(CacheFile('s', hash), disk_cache::Kind::Shader, hash, cached)) {
+        ComPtr<ID3D12ShaderReflection> reflection;
+        if (SUCCEEDED(D3DReflect(cached.data(), cached.size(), IID_PPV_ARGS(&reflection))) &&
+            SUCCEEDED(D3DCreateBlob(cached.size(), &code))) {
+            std::memcpy(code->GetBufferPointer(), cached.data(), cached.size());
+            ++g_perf.shader_hits;
+            blobs_[hash] = code;
+            return code.Get();
+        }
+    }
+    return nullptr;
+}
+
+ID3DBlob *D3D12Backend::Compile(const std::string &src, const char *entry, const char *profile, uint64_t &hash) {
     // one source can hold several entry points
     uint64_t profile_seed = Hash(profile, std::strlen(profile));
     uint64_t entry_seed = Hash(entry, std::strlen(entry), profile_seed);
     hash = Hash(src.data(), src.size(), entry_seed);
-    auto it = blobs_.find(hash);
-    if (it != blobs_.end()) return it->second.Get();
-    ComPtr<ID3DBlob> code;
-    ComPtr<ID3DBlob> err;
+    if (auto it = blobs_.find(hash); it != blobs_.end())
+        return it->second.Get();
+    if (auto cached = CachedShader(hash))
+        return cached;
+    ComPtr<ID3DBlob> code, err;
     PerfScope perf_compile{g_perf.compile};
     g_perf.shaders++;
     HRESULT hr = D3DCompile(src.data(), src.size(), nullptr, nullptr, nullptr, entry, profile,
                             D3DCOMPILE_OPTIMIZATION_LEVEL1, 0, &code, &err);
     if (FAILED(hr)) {
-        LOGE("d3d12: %s compile failed: %s", profile, err ? static_cast<const char*>(err->GetBufferPointer()) : "?");
+        LOGE("d3d12: %s compile failed: %s", profile, err ? static_cast<const char *>(err->GetBufferPointer()) : "?");
         LOGE("%s", src.c_str());
         blobs_[hash] = nullptr;
         return nullptr;
     }
     blobs_[hash] = code;
+    disk_cache::Write(CacheFile('s', hash), disk_cache::Kind::Shader, hash,
+                      {static_cast<const uint8_t *>(code->GetBufferPointer()), code->GetBufferSize()});
     return code.Get();
 }
 
+void D3D12Backend::WarmPipelines() {
+    // Replay known recipes before gameplay. Bytecode alone avoids HLSL work,
+    // but the driver can still spend hundreds of milliseconds creating a PSO.
+    // These are portable recipes, never opaque driver binaries.
+    auto start = PerfClock::now();
+    std::error_code error;
+    auto directory = CacheFile('r', 0).parent_path();
+    std::filesystem::directory_iterator it(directory, error), end;
+    unsigned visited = 0, ready = 0;
+    warming_ = true;
+    while (!error && it != end && visited < 128 && PerfMs(start) < 3000) {
+        auto path = it->path();
+        it.increment(error);
+        auto name = path.filename().string();
+        if (name.size() != 22 || name.substr(0, 2) != "r_" || name.substr(18) != ".bin")
+            continue;
+        ++visited;
+        uint64_t hash = 0;
+        auto parsed = std::from_chars(name.data() + 2, name.data() + 18, hash, 16);
+        if (parsed.ec != std::errc{} || parsed.ptr != name.data() + 18)
+            continue;
+        std::vector<uint8_t> bytes;
+        if (!disk_cache::Read(path, disk_cache::Kind::PipelineRecipe, hash, bytes) || bytes.size() != sizeof(PsoKey))
+            continue;
+        PsoKey key;
+        std::memcpy(&key, bytes.data(), sizeof(key));
+        if (Hash(&key, sizeof(key)) != hash)
+            continue;
+        auto vs = CachedShader(key.vs), ps = CachedShader(key.ps);
+        if (vs && ps) {
+            if (EnsurePipeline(key, vs, ps))
+                ++ready;
+            else
+                psos_.erase(hash); // a rejected recipe must not poison the live path
+        }
+    }
+    warming_ = false;
+    if (visited)
+        LOGR("d3d12: warmed %u/%u pipeline recipes in %.1f ms", ready, visited, PerfMs(start));
+}
+
 // a full screen pass's pipeline: solid, no culling, one target, writing all channels; callers set the blend
-D3D12_GRAPHICS_PIPELINE_STATE_DESC D3D12Backend::FullScreenPipelineDesc(ID3DBlob* vs, ID3DBlob* ps,
+D3D12_GRAPHICS_PIPELINE_STATE_DESC D3D12Backend::FullScreenPipelineDesc(ID3DBlob *vs, ID3DBlob *ps,
                                                                         DXGI_FORMAT rtv) const {
     D3D12_GRAPHICS_PIPELINE_STATE_DESC d{};
     d.pRootSignature = root_.Get();
@@ -1644,7 +1759,11 @@ ID3D12PipelineState* D3D12Backend::EnsurePipeline(const PsoKey& k, ID3DBlob* vs,
     if (k.topo == uint32_t(Topology::Points)) ExpandPoints(d);
     ComPtr<ID3D12PipelineState> pso;
     g_perf.psos++;
+    PerfScope perf_pipeline{g_perf.pipeline};
     if (FAILED(dev_->CreateGraphicsPipelineState(&d, IID_PPV_ARGS(&pso)))) LOGE("d3d12: pipeline creation failed");
+    else if (!warming_)
+        disk_cache::Write(CacheFile('r', h), disk_cache::Kind::PipelineRecipe, h,
+                          {reinterpret_cast<const uint8_t*>(&k), sizeof(k)});
     psos_[h] = pso;
     return pso.Get();
 }
@@ -3279,7 +3398,8 @@ void D3D12Backend::Present(const Surface& front) {
     bool vsync = app::Get().vsync;
     auto perf_swap = PerfClock::now();
     swap_->Present(vsync ? 1 : 0, !vsync && tearing_ ? DXGI_PRESENT_ALLOW_TEARING : 0);
-    g_perf.swap += PerfMs(perf_swap);
+    double swap_ms = PerfMs(perf_swap);
+    g_perf.swap += swap_ms;
 
     presents_++;
     presents_seen_.store(presents_);
@@ -3287,7 +3407,10 @@ void D3D12Backend::Present(const Surface& front) {
     ReleaseOldTextures();
     ResetFrame();
     CountFps();
+    static FrameTrace trace;
+    trace.Record(swap_ms);
     if (diag::Perf()) LogPerf();
+    trace.previous = g_perf;
     ApplySettings();
 }
 
