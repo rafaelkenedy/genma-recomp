@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include "app/app.h"
 #include "core/input.h"
+#include "core/frame_clock.h"
 #ifndef XBE_DISABLE_CONTROLLER_BRIDGE
 #include "core/wsl_controller_bridge.h"
 #endif
@@ -72,19 +73,9 @@ void LogSystem() {
     LOGR("Experimental native Linux SDL/Vulkan runtime");
     LogSettings();
 }
-void Pace() {
-    using C = std::chrono::steady_clock;
-    static C::time_point next = C::now();
-    uint32_t cap = Get().fps_cap;
-    if (!cap) {
-        next = C::now();
-        return;
-    }
-    auto period = std::chrono::nanoseconds(1000000000ull / cap);
-    next += period;
-    if (next < C::now() - period)
-        next = C::now();
-    std::this_thread::sleep_until(next);
+void Pace(bool guest_vblank) {
+    static timing::FrameDeadline deadline;
+    timing::WaitUntil(deadline.Next(timing::Clock::now(), Get().fps_cap, guest_vblank));
 }
 } // namespace app
 

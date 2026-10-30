@@ -22,6 +22,7 @@
 #include "app/app.h"
 #include "core/input.h"
 #include "core/log.h"
+#include "core/frame_clock.h"
 #include "gpu/backend.h"
 #include "image_symbols.h"
 #include "kernel/kernel.h"
@@ -203,20 +204,9 @@ std::recursive_mutex& UiLock() {
 void ApplyDisplay() { PostMessageW(g_hwnd, kApplyDisplay, 0, 0); }
 void OpenGameWindow(bool apply) { SendMessageW(g_hwnd, kOpenWindow, apply, 0); }
 
-void Pace() {
-    using clock = std::chrono::steady_clock;
-    static clock::time_point next = clock::now();
-    uint32_t cap = Get().fps_cap;
-    auto now = clock::now();
-    if (!cap) {
-        next = now;
-        return;
-    }
-    auto period = std::chrono::nanoseconds(1000000000ull / cap);
-    next += period;
-    if (next < now - period) next = now;
-    while (clock::now() + std::chrono::milliseconds(2) < next) Sleep(1);
-    while (clock::now() < next) std::this_thread::yield();
+void Pace(bool guest_vblank) {
+    static timing::FrameDeadline deadline;
+    timing::WaitUntil(deadline.Next(timing::Clock::now(), Get().fps_cap, guest_vblank));
 }
 
 }  // namespace app
@@ -277,6 +267,17 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     ImGui_ImplWin32_Init(app::g_hwnd);
 
     input::Init();
+    // Same opt-in bounded run as the Linux diagnostic host. The timer belongs
+    // to this process and exits through the normal host shutdown path.
+    if (const char* value = std::getenv("XBE_RUN_SECONDS")) {
+        char* end = nullptr;
+        unsigned long seconds = std::strtoul(value, &end, 10);
+        if (end != value && !*end && seconds > 0 && seconds <= 3600)
+            SetTimer(app::g_hwnd, 0, seconds * 1000, [](HWND hwnd, UINT, UINT_PTR id, DWORD) {
+                KillTimer(hwnd, id);
+                PostQuitMessage(0);
+            });
+    }
     if (app::kGame.window) app::kGame.window(app::g_hwnd);
     std::wstring hdd = app::Instance() > 1 ? L"hdd" + std::to_wstring(app::Instance()) : L"hdd";
     if (app::Instance())

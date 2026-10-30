@@ -23,6 +23,7 @@
 # runtime and debugging files
 settings.toml
 /logs/
+/shader-cache-d3d12/
 /hdd/
 /CrashDumps/
 captures/

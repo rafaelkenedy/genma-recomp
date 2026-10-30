@@ -82,6 +82,21 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           & ./build/test_modern_controls_hook.exe
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & $cxx -std=c++20 -static -UNDEBUG -Wall -Wextra -Isdk/runtime -Ibuild/GenmaOnimusha_symbols tools/test_background_streaming_hook.cpp -o build/test_background_streaming_hook.exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & ./build/test_background_streaming_hook.exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Frame timing and cache regression tests
+        shell: pwsh
+        run: |
+          $cxx = "$env:GITHUB_WORKSPACE/llvm-mingw/bin/clang++.exe"
+          foreach ($test in @('test_frame_clock', 'test_disk_cache', 'test_resource_cache', 'test_xpr_index')) {
+            & $cxx -std=c++20 -static -UNDEBUG -Wall -Wextra -Isdk/runtime "tools/$test.cpp" -o "build/$test.exe"
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            & "./build/$test.exe"
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          }
 
       - name: Updater regression tests
         shell: pwsh

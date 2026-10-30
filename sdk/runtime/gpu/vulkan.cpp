@@ -1520,7 +1520,6 @@ void Vulkan::Present(const Surface &front) {
     auto size = app::LinuxWindowSize();
     if (!swap_ || !size.width || !size.height) {
         Submit();
-        app::Pace();
         return;
     }
     uint32_t index = 0;
@@ -1600,7 +1599,6 @@ void Vulkan::Present(const Surface &front) {
             it = textures_.erase(it);
         } else
             ++it;
-    app::Pace();
 }
 Vulkan::~Vulkan() {
     if (!device_)

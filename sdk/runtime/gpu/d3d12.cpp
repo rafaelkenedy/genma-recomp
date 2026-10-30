@@ -9,10 +9,12 @@
 #include <d3d12.h>
 #include <d3d12sdklayers.h>
 #include <d3dcompiler.h>
+#include <d3d12shader.h>
 #include <dxgi1_6.h>
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -32,6 +34,8 @@
 #include "core/diag.h"
 #include "core/log.h"
 #include "gpu/backend.h"
+#include "gpu/disk_cache.h"
+#include "core/resource_cache.h"
 #include "gpu/ext.h"
 #include "gpu/replace.h"
 #include "gpu/shaders.h"
@@ -71,12 +75,14 @@ struct Perf {
     double sig = 0;
     double texup = 0;
     double compile = 0;
+    double pipeline = 0;
     double clear = 0;
     double copy = 0;
     double present = 0;
     double wait = 0;
     double swap = 0;
     double sync = 0;
+    double hd_source = 0, hd_prepare = 0, hd_resource = 0, hd_copy = 0;
     // counts and bytes
     uint64_t draws = 0;
     uint64_t verts = 0;
@@ -93,6 +99,8 @@ struct Perf {
     uint64_t syncs = 0;
     uint64_t psos = 0;
     uint64_t shaders = 0;
+    uint64_t shader_hits = 0;
+    uint64_t hd_hits = 0;
     uint64_t raw = 0;
     uint64_t lates = 0;
 };
@@ -102,6 +110,62 @@ struct PerfScope {
     PerfClock::time_point t = PerfClock::now();
     ~PerfScope() { acc += PerfMs(t); }
 };
+
+// Opt-in per-frame evidence, separate from the one-second averages. Buffered
+// writes are flushed every 60 frames so a diagnostic stop keeps the last samples.
+struct FrameTrace {
+    FILE *file = nullptr;
+    Perf previous{};
+    PerfClock::time_point start = PerfClock::now(), last = start;
+    uint64_t frames = 0;
+    assets::StreamingFrame previous_streaming;
+    FrameTrace() {
+        if (const wchar_t *path = _wgetenv(L"XBE_FRAME_TRACE"); path && *path) {
+            file = _wfopen(path, L"wb");
+            if (!file) {
+                LOGE("frame trace: cannot open output");
+                return;
+            }
+            std::fprintf(file, "frame,time_ms,interval_ms,draw_ms,compile_ms,pipeline_ms,texture_ms,sync_ms,gpu_wait_"
+                               "ms,swap_ms,shaders,psos,tex_uploads,upload_mib,shader_cache_hits,hd_gpu_cache_hits,"
+                               "stage,room,camera,guest_read_ms,guest_read_mib,hd_source_ms,hd_prepare_ms,hd_resource_ms,hd_copy_ms\n");
+        }
+    }
+    void Record(double swap, const assets::StreamingFrame& streaming) {
+        if (!file)
+            return;
+        auto now = PerfClock::now();
+        std::fprintf(
+            file, "%llu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%llu,%llu,%llu,%.6f,%llu,%llu",
+            (unsigned long long)++frames, std::chrono::duration<double, std::milli>(now - start).count(),
+            std::chrono::duration<double, std::milli>(now - last).count(), g_perf.draw - previous.draw,
+            g_perf.compile - previous.compile, g_perf.pipeline - previous.pipeline, g_perf.texup - previous.texup,
+            g_perf.sync - previous.sync, g_perf.wait - previous.wait, swap,
+            (unsigned long long)(g_perf.shaders - previous.shaders), (unsigned long long)(g_perf.psos - previous.psos),
+            (unsigned long long)(g_perf.texups - previous.texups), double(g_perf.upload - previous.upload) / 1048576.0,
+            (unsigned long long)(g_perf.shader_hits - previous.shader_hits),
+            (unsigned long long)(g_perf.hd_hits - previous.hd_hits));
+        const bool known = streaming.camera != ~uint64_t{0};
+        std::fprintf(file, ",%d,%d,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+            known ? int((streaming.camera >> 32) & 0xffff) : -1,
+            known ? int((streaming.camera >> 16) & 0xffff) : -1,
+            known ? int(streaming.camera & 0xffff) : -1,
+            double(streaming.read_ns - previous_streaming.read_ns) / 1e6,
+            double(streaming.read_bytes - previous_streaming.read_bytes) / 1048576.0,
+            g_perf.hd_source - previous.hd_source, g_perf.hd_prepare - previous.hd_prepare,
+            g_perf.hd_resource - previous.hd_resource, g_perf.hd_copy - previous.hd_copy);
+        previous_streaming = streaming;
+        last = now;
+        if (frames % 60 == 0)
+            std::fflush(file);
+    }
+};
+
+std::filesystem::path CacheFile(char kind, uint64_t key) {
+    char name[32];
+    std::snprintf(name, sizeof(name), "%c_%016llX.bin", kind, (unsigned long long)key);
+    return app::CacheDir() / "shader-cache-d3d12" / "v1" / name;
+}
 
 // F3 captures only with diag::CaptureDir set
 // shadow volume depth bias experiment (KeyDepthStencil): units and slope, set on the render thread only
@@ -335,6 +399,22 @@ struct Tex {
     uint64_t palette = 0;  // hash of the colours a P8 texture was decoded with
     uint8_t flags = 0;  // Extension::Decoded's
     uint64_t replaced = 0;  // the content hash of the HD replacement res holds (replace.h), 0 for the game's own
+    bool immutable_hd = false;
+};
+
+struct HdKey {
+    uint64_t content, palette;
+    bool operator==(const HdKey&) const = default;
+};
+struct HdHash {
+    size_t operator()(const HdKey& key) const { return size_t(key.content ^ (key.palette * 0x9E3779B97F4A7C15ull)); }
+};
+struct HdTexture {
+    ComPtr<ID3D12Resource> res;
+    DXGI_FORMAT format;
+    uint32_t levels;
+    uint64_t bytes;
+    size_t CacheBytes() const { return size_t(bytes); }
 };
 
 struct PsoKey {
@@ -519,11 +599,14 @@ private:
     void UploadTexture(Tex& tx, const TextureDesc& d, const FormatInfo& fi, const uint8_t* p, const uint32_t* colours,
                        bool same);
     void UploadTextureLevel(Tex& tx, uint32_t f, uint32_t l, const std::vector<uint8_t>& px, uint32_t pitch);
-    bool UploadReplacement(Tex& tx, uint64_t content, Replacement& r, const uint32_t* colours);
+    bool UploadReplacement(Tex& tx, uint64_t content, uint64_t palette_sig, const uint32_t* colours);
+    bool UploadReplacementData(Tex& tx, uint64_t content, const Replacement& source, const uint32_t* colours);
     void EnsurePixelShader(const PixelKey& pk, DrawShaders& sh);
     void BuildPipelineKey(const State& s, const Assembled& a, uint64_t vh, uint64_t ph, PsoKey& k);
     void KeyDepthStencil(const State& s, const Assembled& a, PsoKey& k);
     ID3D12PipelineState* EnsurePipeline(const PsoKey& k, ID3DBlob* vs, ID3DBlob* ps);
+    ID3DBlob* CachedShader(uint64_t hash);
+    void WarmPipelines();
     void FillPipelineDesc(const PsoKey& k, ID3DBlob* vs, ID3DBlob* ps, D3D12_GRAPHICS_PIPELINE_STATE_DESC& d) const;
     void ExpandPoints(D3D12_GRAPHICS_PIPELINE_STATE_DESC& d);
     float TargetScale() const;  // host pixels per console pixel of the bound target
@@ -673,12 +756,14 @@ private:
     std::unordered_map<uint64_t, ComPtr<ID3DBlob>> blobs_;
     std::unordered_map<uint64_t, uint64_t> shader_src_;  // vertex and pixel program keys to source hash
     std::unordered_map<uint64_t, ComPtr<ID3D12PipelineState>> psos_;
+    bool warming_ = false;
     std::unordered_map<uint64_t, uint32_t> samplers_;
     uint32_t smp_used_ = 0;
     std::unordered_map<uint64_t, Target> targets_;
     std::unordered_map<uint32_t, uint64_t> target_used_;  // target address to the frame it was last used
     std::unordered_map<uint32_t, Tex> cpu_depth_textures_;
     std::unordered_map<uint64_t, Tex> textures_;  // by data address, a P8 texture's with its palette's above
+    cache::Resources<HdKey, HdTexture, HdHash> hd_textures_{256ull << 20};
     std::unordered_map<uint64_t, ComPtr<ID3D12PipelineState>> blit_psos_;
     Extension* ext_ = nullptr;
     // one frame capture: every draw in a text file, each target as the frame leaves it, the textures it read
@@ -775,11 +860,13 @@ bool D3D12Backend::Init(uint32_t width, uint32_t height) {
     CreateHeaps();
     CreateBackBufferViews();
     if (!CreateRootSignature()) return false;
+    WarmPipelines();
     CreateFrames();
     CreateGammaLut();
     ImGui_ImplDX12_Init(dev_.Get(), kFrames, DXGI_FORMAT_B8G8R8A8_UNORM, ui_heap_.Get(),
                         ui_heap_->GetCPUDescriptorHandleForHeapStart(), ui_heap_->GetGPUDescriptorHandleForHeapStart());
     LoadSettings();
+    StartReplacementPrefetch(app::Get().hd_textures);
     Begin();
     LOGI("d3d12: %ux%u guest, %ux%u window, render scale %.3f", width, height, bb_w_, bb_h_, scale_);
     return true;
@@ -1413,31 +1500,94 @@ void D3D12Backend::Blit(ID3D12Resource* src, DXGI_FORMAT fmt, const float uvrect
     DrawFullScreen(EnsureBlitPipeline(o.rtv, o.over), cb.gpu, slot, si);
 }
 
-ID3DBlob* D3D12Backend::Compile(const std::string& src, const char* entry, const char* profile, uint64_t& hash) {
+ID3DBlob* D3D12Backend::CachedShader(uint64_t hash) {
+    auto it = blobs_.find(hash);
+    if (it != blobs_.end())
+        return it->second.Get();
+    ComPtr<ID3DBlob> code;
+    std::vector<uint8_t> cached;
+    if (disk_cache::Read(CacheFile('s', hash), disk_cache::Kind::Shader, hash, cached)) {
+        ComPtr<ID3D12ShaderReflection> reflection;
+        if (SUCCEEDED(D3DReflect(cached.data(), cached.size(), IID_PPV_ARGS(&reflection))) &&
+            SUCCEEDED(D3DCreateBlob(cached.size(), &code))) {
+            std::memcpy(code->GetBufferPointer(), cached.data(), cached.size());
+            ++g_perf.shader_hits;
+            blobs_[hash] = code;
+            return code.Get();
+        }
+    }
+    return nullptr;
+}
+
+ID3DBlob *D3D12Backend::Compile(const std::string &src, const char *entry, const char *profile, uint64_t &hash) {
     // one source can hold several entry points
     uint64_t profile_seed = Hash(profile, std::strlen(profile));
     uint64_t entry_seed = Hash(entry, std::strlen(entry), profile_seed);
     hash = Hash(src.data(), src.size(), entry_seed);
-    auto it = blobs_.find(hash);
-    if (it != blobs_.end()) return it->second.Get();
-    ComPtr<ID3DBlob> code;
-    ComPtr<ID3DBlob> err;
+    if (auto it = blobs_.find(hash); it != blobs_.end())
+        return it->second.Get();
+    if (auto cached = CachedShader(hash))
+        return cached;
+    ComPtr<ID3DBlob> code, err;
     PerfScope perf_compile{g_perf.compile};
     g_perf.shaders++;
     HRESULT hr = D3DCompile(src.data(), src.size(), nullptr, nullptr, nullptr, entry, profile,
                             D3DCOMPILE_OPTIMIZATION_LEVEL1, 0, &code, &err);
     if (FAILED(hr)) {
-        LOGE("d3d12: %s compile failed: %s", profile, err ? static_cast<const char*>(err->GetBufferPointer()) : "?");
+        LOGE("d3d12: %s compile failed: %s", profile, err ? static_cast<const char *>(err->GetBufferPointer()) : "?");
         LOGE("%s", src.c_str());
         blobs_[hash] = nullptr;
         return nullptr;
     }
     blobs_[hash] = code;
+    disk_cache::Write(CacheFile('s', hash), disk_cache::Kind::Shader, hash,
+                      {static_cast<const uint8_t *>(code->GetBufferPointer()), code->GetBufferSize()});
     return code.Get();
 }
 
+void D3D12Backend::WarmPipelines() {
+    // Replay known recipes before gameplay. Bytecode alone avoids HLSL work,
+    // but the driver can still spend hundreds of milliseconds creating a PSO.
+    // These are portable recipes, never opaque driver binaries.
+    auto start = PerfClock::now();
+    std::error_code error;
+    auto directory = CacheFile('r', 0).parent_path();
+    std::filesystem::directory_iterator it(directory, error), end;
+    unsigned visited = 0, ready = 0;
+    warming_ = true;
+    while (!error && it != end && visited < 128 && PerfMs(start) < 3000) {
+        auto path = it->path();
+        it.increment(error);
+        auto name = path.filename().string();
+        if (name.size() != 22 || name.substr(0, 2) != "r_" || name.substr(18) != ".bin")
+            continue;
+        ++visited;
+        uint64_t hash = 0;
+        auto parsed = std::from_chars(name.data() + 2, name.data() + 18, hash, 16);
+        if (parsed.ec != std::errc{} || parsed.ptr != name.data() + 18)
+            continue;
+        std::vector<uint8_t> bytes;
+        if (!disk_cache::Read(path, disk_cache::Kind::PipelineRecipe, hash, bytes) || bytes.size() != sizeof(PsoKey))
+            continue;
+        PsoKey key;
+        std::memcpy(&key, bytes.data(), sizeof(key));
+        if (Hash(&key, sizeof(key)) != hash)
+            continue;
+        auto vs = CachedShader(key.vs), ps = CachedShader(key.ps);
+        if (vs && ps) {
+            if (EnsurePipeline(key, vs, ps))
+                ++ready;
+            else
+                psos_.erase(hash); // a rejected recipe must not poison the live path
+        }
+    }
+    warming_ = false;
+    if (visited)
+        LOGR("d3d12: warmed %u/%u pipeline recipes in %.1f ms", ready, visited, PerfMs(start));
+}
+
 // a full screen pass's pipeline: solid, no culling, one target, writing all channels; callers set the blend
-D3D12_GRAPHICS_PIPELINE_STATE_DESC D3D12Backend::FullScreenPipelineDesc(ID3DBlob* vs, ID3DBlob* ps,
+D3D12_GRAPHICS_PIPELINE_STATE_DESC D3D12Backend::FullScreenPipelineDesc(ID3DBlob *vs, ID3DBlob *ps,
                                                                         DXGI_FORMAT rtv) const {
     D3D12_GRAPHICS_PIPELINE_STATE_DESC d{};
     d.pRootSignature = root_.Get();
@@ -1644,7 +1794,11 @@ ID3D12PipelineState* D3D12Backend::EnsurePipeline(const PsoKey& k, ID3DBlob* vs,
     if (k.topo == uint32_t(Topology::Points)) ExpandPoints(d);
     ComPtr<ID3D12PipelineState> pso;
     g_perf.psos++;
+    PerfScope perf_pipeline{g_perf.pipeline};
     if (FAILED(dev_->CreateGraphicsPipelineState(&d, IID_PPV_ARGS(&pso)))) LOGE("d3d12: pipeline creation failed");
+    else if (!warming_)
+        disk_cache::Write(CacheFile('r', h), disk_cache::Kind::PipelineRecipe, h,
+                          {reinterpret_cast<const uint8_t*>(&k), sizeof(k)});
     psos_[h] = pso;
     return pso.Get();
 }
@@ -1779,8 +1933,55 @@ void D3D12Backend::UploadTexture(Tex& tx, const TextureDesc& d, const FormatInfo
 }
 
 // an HD replacement in place of the game's texture: its own size and levels, BGRA or the DDS's block format
-bool D3D12Backend::UploadReplacement(Tex& tx, uint64_t content, Replacement& r, const uint32_t* colours) {
-    PrepareLevels(r, colours);
+bool D3D12Backend::UploadReplacement(Tex& tx, uint64_t content, uint64_t palette_sig, const uint32_t* colours) {
+    const auto acquire = [&] {
+        PerfScope timing{g_perf.hd_source};
+        return LoadReplacement(content, palette_sig);
+    };
+    if (!ReplacementCaching() || ReplacementUsesPalette(content, palette_sig)) {
+        auto source = acquire();
+        // Indexed images follow live palettes and stay mutable, as before.
+        // Detach any immutable cached image before writing this texture.
+        if (source && tx.immutable_hd) {
+            CurrentFrame().garbage.push_back(tx.res);
+            tx.res.Reset();
+            tx.immutable_hd = false;
+        }
+        return source && UploadReplacementData(tx, content, *source, colours);
+    }
+    auto load = [&]() -> std::shared_ptr<const HdTexture> {
+        auto source = acquire();
+        if (!source) return {};
+        Tex uploaded;
+        if (!UploadReplacementData(uploaded, content, *source, colours)) return {};
+        auto desc = uploaded.res->GetDesc();
+        auto info = dev_->GetResourceAllocationInfo(0, 1, &desc);
+        return std::make_shared<HdTexture>(HdTexture{uploaded.res, uploaded.fmt, uploaded.levels, info.SizeInBytes});
+    };
+    bool hit = false;
+    auto image = hd_textures_.Get({content, palette_sig}, load, &hit);
+    if (!image) return false;
+    if (hit) ++g_perf.hd_hits;
+    if (tx.res != image->res) {
+        if (tx.res) CurrentFrame().garbage.push_back(tx.res);
+        tx.res = image->res;
+    }
+    tx.fmt = image->format;
+    tx.levels = image->levels;
+    tx.replaced = content;
+    tx.immutable_hd = true;
+    return true;
+}
+
+bool D3D12Backend::UploadReplacementData(Tex& tx, uint64_t content, const Replacement& source, const uint32_t* colours) {
+    Replacement prepared;
+    // Cached source data is immutable. Palette expansion is local to this upload.
+    if (!source.Compressed()) {
+        PerfScope timing{g_perf.hd_prepare};
+        prepared = source;
+        PrepareLevels(prepared, colours);
+    }
+    const Replacement& r = source.Compressed() ? source : prepared;
     using K = Replacement::Kind;
     DXGI_FORMAT fmt = r.kind == K::BC1   ? DXGI_FORMAT_BC1_UNORM
                       : r.kind == K::BC2 ? DXGI_FORMAT_BC2_UNORM
@@ -1791,6 +1992,7 @@ bool D3D12Backend::UploadReplacement(Tex& tx, uint64_t content, Replacement& r, 
     if (r.Compressed() && ((r.w & 3) || (r.h & 3))) return false;
     bool fresh = tx.replaced != content || !tx.res || tx.fmt != fmt || tx.levels != r.levels.size();
     if (fresh) {
+        PerfScope timing{g_perf.hd_resource};
         if (tx.res) CurrentFrame().garbage.push_back(tx.res);
         tx.res.Reset();
         D3D12_HEAP_PROPERTIES hp{D3D12_HEAP_TYPE_DEFAULT};
@@ -1806,11 +2008,14 @@ bool D3D12Backend::UploadReplacement(Tex& tx, uint64_t content, Replacement& r, 
         D3D12_RESOURCE_STATES cur = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
         Transition(tx.res.Get(), cur, D3D12_RESOURCE_STATE_COPY_DEST);
     }
-    uint32_t w = r.w;
-    for (uint32_t l = 0; l < tx.levels; l++) {
-        uint32_t pitch = r.Compressed() ? ((w + 3) / 4) * r.BlockBytes() : w * 4;
-        UploadTextureLevel(tx, 0, l, r.levels[l], pitch);
-        w = std::max(w / 2, 1u);
+    {
+        PerfScope timing{g_perf.hd_copy};
+        uint32_t w = r.w;
+        for (uint32_t l = 0; l < tx.levels; l++) {
+            uint32_t pitch = r.Compressed() ? ((w + 3) / 4) * r.BlockBytes() : w * 4;
+            UploadTextureLevel(tx, 0, l, r.levels[l], pitch);
+            w = std::max(w / 2, 1u);
+        }
     }
     D3D12_RESOURCE_STATES st = D3D12_RESOURCE_STATE_COPY_DEST;
     Transition(tx.res.Get(), st, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
@@ -1879,7 +2084,6 @@ ID3D12Resource* D3D12Backend::BindGuestTexture(const State& s, int stage, const 
             g_perf.texup_bytes += total;
             const uint32_t* colours = palette.va ? palette.colours : nullptr;
             // HD replacement by the content of level 0 as the game stores it (P8: the indices alone)
-            Replacement rep;
             bool have = false;
             uint64_t content = 0;
             bool replaceable = !d.linear && !d.cube && d.depth == 1;
@@ -1888,9 +2092,9 @@ ID3D12Resource* D3D12Backend::BindGuestTexture(const State& s, int stage, const 
                 // a P8 texture's file is per palette: the same indices may be drawn with several
                 uint64_t sig = d.format == 0x0B && colours ? PaletteSignature(p, LevelSize(d, 0), colours) : 0;
                 if (DumpTextures()) DumpTexture(content, sig, d, p, colours);
-                if (hd && HasReplacement(content, sig)) have = LoadReplacement(content, sig, rep);
+                if (hd && HasReplacement(content, sig)) have = UploadReplacement(tx, content, sig, colours);
             }
-            if (have && UploadReplacement(tx, content, rep, colours)) {
+            if (have) {
                 tx.sig = sig;
             } else {
                 if (tx.replaced) {
@@ -3279,7 +3483,8 @@ void D3D12Backend::Present(const Surface& front) {
     bool vsync = app::Get().vsync;
     auto perf_swap = PerfClock::now();
     swap_->Present(vsync ? 1 : 0, !vsync && tearing_ ? DXGI_PRESENT_ALLOW_TEARING : 0);
-    g_perf.swap += PerfMs(perf_swap);
+    double swap_ms = PerfMs(perf_swap);
+    g_perf.swap += swap_ms;
 
     presents_++;
     presents_seen_.store(presents_);
@@ -3287,7 +3492,10 @@ void D3D12Backend::Present(const Surface& front) {
     ReleaseOldTextures();
     ResetFrame();
     CountFps();
+    static FrameTrace trace;
+    trace.Record(swap_ms, streaming_frame_);
     if (diag::Perf()) LogPerf();
+    trace.previous = g_perf;
     ApplySettings();
 }
 
@@ -3379,6 +3587,7 @@ void D3D12Backend::Record(Target& t) {
 }
 
 void D3D12Backend::ApplySettings() {
+    StartReplacementPrefetch(app::Get().hd_textures);
     float want = app::RenderScale(guest_h_);
     bool remake = ext_ && ext_->Settings();
     if (std::fabs(want - scale_) > 1e-4f || remake) {
